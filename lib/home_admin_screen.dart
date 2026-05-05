@@ -1,8 +1,9 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
+import 'equipamentos_screen.dart';
 import 'main.dart';
-import 'mapa_screen.dart';
 import 'documentos_screen.dart';
-import 'qr_code_screen.dart';
 import 'colaboradores_screen.dart';
 
 class HomeAdminScreen extends StatelessWidget {
@@ -163,8 +164,6 @@ class HomeAdminScreen extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
-
-                      // 🔥 LOGOUT
                       GestureDetector(
                         onTap: () => _logout(context),
                         child: const CircleAvatar(
@@ -212,7 +211,6 @@ class HomeAdminScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 18),
-
                         Row(
                           children: [
                             _buildMiniStatus(
@@ -260,7 +258,6 @@ class HomeAdminScreen extends StatelessWidget {
                       onTap: () {},
                     ),
 
-                    // ✅ CORRIGIDO AQUI
                     _buildAdminCard(
                       icon: Icons.people_alt_rounded,
                       title: 'Colaboradores',
@@ -287,7 +284,7 @@ class HomeAdminScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const MapaScreen(),
+                            builder: (_) => const EquipamentosScreen(),
                           ),
                         );
                       },
@@ -304,22 +301,6 @@ class HomeAdminScreen extends StatelessWidget {
                           context,
                           MaterialPageRoute(
                             builder: (_) => const DocumentosScreen(),
-                          ),
-                        );
-                      },
-                    ),
-
-                    _buildAdminCard(
-                      icon: Icons.qr_code_scanner_rounded,
-                      title: 'QR Code',
-                      subtitle: 'Escanear registros',
-                      iconBgColor: const Color(0xFFFFEBEE),
-                      iconColor: const Color(0xFFE53935),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const QrCodeScreen(),
                           ),
                         );
                       },
