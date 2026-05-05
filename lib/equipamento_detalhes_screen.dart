@@ -56,21 +56,34 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         carregando = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar veículo: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao carregar veículo: $e');
     }
+  }
+
+  void mostrarErro(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void mostrarSucesso(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   String calcularStatus(DateTime validade) {
     final hoje = DateTime.now();
-    final diferenca = validade.difference(hoje).inDays;
+    final dias = validade.difference(hoje).inDays;
 
-    if (diferenca < 0) return 'Vencido';
-    if (diferenca <= 30) return 'A vencer';
+    if (dias < 0) return 'Vencido';
+    if (dias <= 30) return 'A vencer';
     return 'Regular';
   }
 
@@ -80,10 +93,17 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     return const Color(0xFF43A047);
   }
 
+  Color corEquipamento(String status) {
+    if (status == 'Manutenção') return const Color(0xFFE87722);
+    if (status == 'Inativo') return const Color(0xFFE53935);
+    return const Color(0xFF43A047);
+  }
+
   String formatarData(DateTime data) {
     final dia = data.day.toString().padLeft(2, '0');
     final mes = data.month.toString().padLeft(2, '0');
     final ano = data.year.toString();
+
     return '$dia/$mes/$ano';
   }
 
@@ -100,49 +120,58 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
   }
 
   Future<XFile?> escolherImagem() async {
-    return await picker.pickImage(
+    return picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
     );
   }
 
- Future<String?> uploadDocumentoImagem(XFile imagem) async {
-  final user = supabase.auth.currentUser;
+  Future<String?> uploadDocumentoImagem(XFile imagem) async {
+    final user = supabase.auth.currentUser;
 
-  if (user == null) {
-    throw 'Usuário não autenticado.';
+    if (user == null) {
+      throw 'Usuário não autenticado.';
+    }
+
+    final bytes = await imagem.readAsBytes();
+
+    final nomeArquivo =
+        '${user.id}/equipamentos/${widget.equipamentoId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+    await supabase.storage
+        .from('documentos')
+        .uploadBinary(
+          nomeArquivo,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        )
+        .timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        throw 'Tempo esgotado ao enviar imagem.';
+      },
+    );
+
+    final url = supabase.storage.from('documentos').getPublicUrl(nomeArquivo);
+
+    if (url.isEmpty) {
+      throw 'Não foi possível gerar URL da imagem.';
+    }
+
+    return url;
   }
 
-  final bytes = await imagem.readAsBytes();
-
-  final nomeArquivo =
-      '${user.id}/equipamentos/${widget.equipamentoId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-  await supabase.storage
-      .from('documentos')
-      .uploadBinary(
-        nomeArquivo,
-        bytes,
-        fileOptions: const FileOptions(
-          contentType: 'image/jpeg',
-          upsert: true,
-        ),
-      )
-      .timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          throw 'Tempo esgotado ao enviar imagem.';
-        },
-      );
-
-  final url = supabase.storage.from('documentos').getPublicUrl(nomeArquivo);
-
-  if (url.isEmpty) {
-    throw 'Não foi possível gerar URL da imagem.';
+  void abrirImagem(String url) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VisualizarDocumentoEquipamentoScreen(imageUrl: url),
+      ),
+    );
   }
-
-  return url;
-}
 
   Future<void> abrirFormularioDocumento({Map<String, dynamic>? documento}) async {
     final editando = documento != null;
@@ -152,15 +181,13 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     final categoriaController =
         TextEditingController(text: documento?['categoria'] ?? '');
 
-    final dataValidadeTexto = documento?['data_validade'];
-
-    DateTime? dataValidade = dataValidadeTexto != null
-        ? DateTime.tryParse(dataValidadeTexto.toString())
-        : null;
+    final dataTexto = documento?['data_validade'];
+    DateTime? dataValidade =
+        dataTexto != null ? DateTime.tryParse(dataTexto.toString()) : null;
 
     XFile? imagemSelecionada;
     Uint8List? imagemBytes;
-    bool salvandoModal = false;
+    bool salvando = false;
 
     await showModalBottomSheet(
       context: context,
@@ -177,19 +204,14 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                   categoriaController.text.trim().isEmpty ||
                   dataValidade == null ||
                   (!editando && imagemSelecionada == null)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Preencha todos os campos e tire a foto do documento.',
-                    ),
-                    backgroundColor: Colors.red,
-                  ),
+                mostrarErro(
+                  'Preencha todos os campos e tire a foto do documento.',
                 );
                 return;
               }
 
               setModalState(() {
-                salvandoModal = true;
+                salvando = true;
               });
 
               try {
@@ -225,16 +247,17 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                 await carregarDados();
 
                 if (mounted) Navigator.pop(context);
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro ao salvar documento: $e'),
-                    backgroundColor: Colors.red,
-                  ),
+
+                mostrarSucesso(
+                  editando
+                      ? 'Documento atualizado com sucesso.'
+                      : 'Documento lançado com sucesso.',
                 );
+              } catch (e) {
+                mostrarErro('Erro ao salvar documento: $e');
               } finally {
                 setModalState(() {
-                  salvandoModal = false;
+                  salvando = false;
                 });
               }
             }
@@ -298,6 +321,11 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                           dataValidade == null
                               ? 'Selecionar data de validade'
                               : 'Validade: ${formatarData(dataValidade!)}',
+                          style: TextStyle(
+                            color: dataValidade == null
+                                ? const Color(0xFF718096)
+                                : const Color(0xFF1A202C),
+                          ),
                         ),
                       ),
                     ),
@@ -357,6 +385,10 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                               imagemSelecionada == null
                                   ? 'Tirar foto do documento'
                                   : 'Foto selecionada',
+                              style: const TextStyle(
+                                color: Color(0xFF1A202C),
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ],
                         ),
@@ -364,7 +396,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                     ),
                     const SizedBox(height: 22),
                     ElevatedButton(
-                      onPressed: salvandoModal ? null : salvar,
+                      onPressed: salvando ? null : salvar,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFE87722),
                         foregroundColor: Colors.white,
@@ -373,10 +405,19 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      child: salvandoModal
-                          ? const CircularProgressIndicator(color: Colors.white)
+                      child: salvando
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
                           : Text(
                               editando ? 'SALVAR ALTERAÇÕES' : 'LANÇAR',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                     ),
                   ],
@@ -387,6 +428,19 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         );
       },
     );
+  }
+
+  String? extrairPathStorage(String? arquivoUrl) {
+    if (arquivoUrl == null || arquivoUrl.isEmpty) return null;
+
+    final uri = Uri.parse(arquivoUrl);
+    final index = uri.pathSegments.indexOf('documentos');
+
+    if (index == -1 || index + 1 >= uri.pathSegments.length) {
+      return null;
+    }
+
+    return uri.pathSegments.sublist(index + 1).join('/');
   }
 
   Future<void> excluirDocumento(Map<String, dynamic> documento) async {
@@ -404,12 +458,25 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
             onPressed: () async {
               Navigator.pop(context);
 
-              await supabase
-                  .from('documentos')
-                  .delete()
-                  .eq('id', documento['id']);
+              try {
+                final pathStorage =
+                    extrairPathStorage(documento['arquivo_url']?.toString());
 
-              await carregarDados();
+                if (pathStorage != null) {
+                  await supabase.storage.from('documentos').remove([pathStorage]);
+                }
+
+                await supabase
+                    .from('documentos')
+                    .delete()
+                    .eq('id', documento['id']);
+
+                await carregarDados();
+
+                mostrarSucesso('Documento excluído completamente.');
+              } catch (e) {
+                mostrarErro('Erro ao excluir documento: $e');
+              }
             },
             child: const Text('Excluir'),
           ),
@@ -418,108 +485,96 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     );
   }
 
-  Widget documentoCard(Map<String, dynamic> documento) {
-    final status = documento['status'] ?? 'Regular';
-    final cor = corStatus(status);
-
-    final validadeTexto = documento['data_validade'];
-    final validade = validadeTexto != null
-        ? DateTime.tryParse(validadeTexto.toString())
-        : null;
+  Widget infoCard() {
+    final status = equipamento?['status'] ?? 'Ativo';
+    final cor = corEquipamento(status);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
-        color: cor.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cor.withOpacity(0.25)),
+        color: const Color(0xFF12365A),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (documento['arquivo_url'] != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                documento['arquivo_url'].toString(),
-                width: 56,
-                height: 56,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            CircleAvatar(
-              backgroundColor: cor.withOpacity(0.15),
-              child: Icon(Icons.description, color: cor),
-            ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  documento['titulo'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF1A202C),
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  documento['categoria'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF718096),
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  validade == null
-                      ? 'Sem validade'
-                      : 'Validade: ${formatarData(validade)}',
-                  style: TextStyle(
-                    color: cor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+          Text(
+            equipamento?['nome'] ?? '',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Column(
+          const SizedBox(height: 6),
+          Text(
+            equipamento?['tipo'] ?? '',
+            style: const TextStyle(
+              color: Color(0xFFCBD5E0),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Row(
             children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: cor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  status,
-                  style: TextStyle(
-                    color: cor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              Expanded(
+                child: infoItem('Placa', equipamento?['placa'] ?? '-'),
               ),
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'editar') {
-                    abrirFormularioDocumento(documento: documento);
-                  }
-
-                  if (value == 'excluir') {
-                    excluirDocumento(documento);
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'editar', child: Text('Editar')),
-                  PopupMenuItem(value: 'excluir', child: Text('Excluir')),
-                ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: infoItem(
+                  'Capacidade',
+                  equipamento?['capacidade'] ?? '-',
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: cor.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              status,
+              style: TextStyle(
+                color: cor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget infoItem(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B2F46),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFFCBD5E0),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -536,6 +591,13 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -566,100 +628,175 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     );
   }
 
-  Widget infoCard() {
-    final status = equipamento?['status'] ?? 'Ativo';
-    final cor = status == 'Ativo'
-        ? const Color(0xFF43A047)
-        : status == 'Manutenção'
-            ? const Color(0xFFE87722)
-            : const Color(0xFFE53935);
+  Widget documentoCard(Map<String, dynamic> documento) {
+    final status = documento['status'] ?? 'Regular';
+    final cor = corStatus(status);
+
+    final validadeTexto = documento['data_validade'];
+    final validade =
+        validadeTexto != null ? DateTime.tryParse(validadeTexto.toString()) : null;
+
+    final arquivoUrl = documento['arquivo_url']?.toString();
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      margin: const EdgeInsets.only(bottom: 18),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF12365A),
-        borderRadius: BorderRadius.circular(20),
+        color: cor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cor.withOpacity(0.25)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            equipamento?['nome'] ?? '',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
+          GestureDetector(
+            onTap: arquivoUrl != null ? () => abrirImagem(arquivoUrl) : null,
+            child: arquivoUrl != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      arquivoUrl,
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : CircleAvatar(
+                    backgroundColor: cor.withOpacity(0.15),
+                    child: Icon(Icons.description, color: cor),
+                  ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            equipamento?['tipo'] ?? '',
-            style: const TextStyle(
-              color: Color(0xFFCBD5E0),
-            ),
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: _infoItem('Placa', equipamento?['placa'] ?? '-'),
+          const SizedBox(width: 14),
+          Expanded(
+            child: GestureDetector(
+              onTap: arquivoUrl != null ? () => abrirImagem(arquivoUrl) : null,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    documento['titulo'] ?? '',
+                    style: const TextStyle(
+                      color: Color(0xFF1A202C),
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    documento['categoria'] ?? '',
+                    style: const TextStyle(
+                      color: Color(0xFF718096),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    validade == null
+                        ? 'Sem validade'
+                        : 'Validade: ${formatarData(validade)}',
+                    style: TextStyle(
+                      color: cor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (arquivoUrl != null) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Toque para abrir imagem',
+                      style: TextStyle(
+                        color: Color(0xFF718096),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child:
-                    _infoItem('Capacidade', equipamento?['capacidade'] ?? '-'),
+            ),
+          ),
+          Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: cor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  status,
+                  style: TextStyle(
+                    color: cor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'abrir' && arquivoUrl != null) {
+                    abrirImagem(arquivoUrl);
+                  }
+
+                  if (value == 'editar') {
+                    abrirFormularioDocumento(documento: documento);
+                  }
+
+                  if (value == 'excluir') {
+                    excluirDocumento(documento);
+                  }
+                },
+                itemBuilder: (_) => [
+                  if (arquivoUrl != null)
+                    const PopupMenuItem(
+                      value: 'abrir',
+                      child: Text('Abrir imagem'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'editar',
+                    child: Text('Editar'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'excluir',
+                    child: Text('Excluir'),
+                  ),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: cor.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              status,
-              style: TextStyle(
-                color: cor,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _infoItem(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1B2F46),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFCBD5E0),
-              fontSize: 12,
-            ),
+  Widget documentosSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Documentos do veículo',
+          style: TextStyle(
+            color: Color(0xFF1A202C),
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
           ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
+        ),
+        const SizedBox(height: 14),
+        if (documentos.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
               color: Colors.white,
-              fontWeight: FontWeight.bold,
+              borderRadius: BorderRadius.circular(18),
             ),
-          ),
-        ],
-      ),
+            child: const Text(
+              'Nenhum documento lançado.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF718096)),
+            ),
+          )
+        else
+          ...documentos.map(documentoCard),
+      ],
     );
   }
 
@@ -688,26 +825,56 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               children: [
                 infoCard(),
                 qrCard(),
-                const Text(
-                  'Documentos do veículo',
-                  style: TextStyle(
-                    color: Color(0xFF1A202C),
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                if (documentos.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 30),
-                    child: Center(
-                      child: Text('Nenhum documento lançado.'),
-                    ),
-                  )
-                else
-                  ...documentos.map(documentoCard),
+                documentosSection(),
               ],
             ),
+    );
+  }
+}
+
+class VisualizarDocumentoEquipamentoScreen extends StatelessWidget {
+  final String imageUrl;
+
+  const VisualizarDocumentoEquipamentoScreen({
+    super.key,
+    required this.imageUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text(
+          'Visualizar documento',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5,
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+
+              return const CircularProgressIndicator(
+                color: Colors.white,
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return const Text(
+                'Erro ao carregar imagem.',
+                style: TextStyle(color: Colors.white),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

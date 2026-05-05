@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DocumentosScreen extends StatefulWidget {
@@ -10,13 +13,15 @@ class DocumentosScreen extends StatefulWidget {
 
 class _DocumentosScreenState extends State<DocumentosScreen> {
   final supabase = Supabase.instance.client;
+  final picker = ImagePicker();
 
   bool carregando = true;
   bool isAdmin = false;
 
   List<Map<String, dynamic>> documentos = [];
   List<Map<String, dynamic>> usuarios = [];
-  Map<String, int> totalDocsPorUsuario = {};
+
+  Map<String, Map<String, int>> resumoPorUsuario = {};
 
   String? usuarioSelecionadoId;
   String? usuarioSelecionadoNome;
@@ -54,37 +59,66 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
       setState(() {
         carregando = false;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar dados: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao carregar dados: $e');
     }
   }
 
   Future<void> carregarUsuariosParaAdmin() async {
     final profiles = await supabase
         .from('profiles')
-        .select('id, nome, matricula, cargo, perfil, status')
+        .select('id, nome, matricula, cargo')
         .eq('perfil', 'Operador')
         .order('nome', ascending: true);
 
-    final docs = await supabase.from('documentos').select('usuario_id');
+    final docs = await supabase.from('documentos').select('usuario_id, status');
 
-    final Map<String, int> contagem = {};
+    final Map<String, Map<String, int>> contagem = {};
 
     for (final doc in docs) {
       final usuarioId = doc['usuario_id'];
-      if (usuarioId != null) {
-        contagem[usuarioId] = (contagem[usuarioId] ?? 0) + 1;
-      }
+      final status = doc['status'];
+
+      if (usuarioId == null || status == null) continue;
+
+      contagem.putIfAbsent(
+        usuarioId,
+        () => {
+          'Regular': 0,
+          'A vencer': 0,
+          'Vencido': 0,
+        },
+      );
+
+      contagem[usuarioId]![status] = (contagem[usuarioId]![status] ?? 0) + 1;
     }
 
+    final lista = List<Map<String, dynamic>>.from(profiles);
+
+    lista.sort((a, b) {
+      final aResumo = contagem[a['id']] ?? {};
+      final bResumo = contagem[b['id']] ?? {};
+
+      final aVencido = aResumo['Vencido'] ?? 0;
+      final bVencido = bResumo['Vencido'] ?? 0;
+
+      final aAVencer = aResumo['A vencer'] ?? 0;
+      final bAVencer = bResumo['A vencer'] ?? 0;
+
+      final aRegular = aResumo['Regular'] ?? 0;
+      final bRegular = bResumo['Regular'] ?? 0;
+
+      if (bVencido != aVencido) return bVencido - aVencido;
+      if (bAVencer != aAVencer) return bAVencer - aAVencer;
+      if (bRegular != aRegular) return bRegular - aRegular;
+
+      return (a['nome'] ?? '')
+          .toString()
+          .compareTo((b['nome'] ?? '').toString());
+    });
+
     setState(() {
-      usuarios = List<Map<String, dynamic>>.from(profiles);
-      totalDocsPorUsuario = contagem;
+      usuarios = lista;
+      resumoPorUsuario = contagem;
     });
   }
 
@@ -98,6 +132,24 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     setState(() {
       documentos = List<Map<String, dynamic>>.from(data);
     });
+  }
+
+  void mostrarErro(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void mostrarSucesso(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   String calcularStatus(DateTime validade) {
@@ -135,7 +187,63 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     );
   }
 
-  Future<void> abrirFormularioDocumento({Map<String, dynamic>? documento}) async {
+  Future<XFile?> escolherImagem() async {
+    return picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+    );
+  }
+
+  Future<String?> uploadDocumentoImagem(XFile imagem) async {
+    final usuarioId = usuarioSelecionadoId ?? supabase.auth.currentUser?.id;
+
+    if (usuarioId == null) {
+      throw 'Usuário não encontrado para upload.';
+    }
+
+    final bytes = await imagem.readAsBytes();
+
+    final nomeArquivo =
+        '$usuarioId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+    await supabase.storage
+        .from('documentos')
+        .uploadBinary(
+          nomeArquivo,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        )
+        .timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        throw 'Tempo esgotado ao enviar imagem.';
+      },
+    );
+
+    final url = supabase.storage.from('documentos').getPublicUrl(nomeArquivo);
+
+    if (url.isEmpty) {
+      throw 'Não foi possível gerar URL da imagem.';
+    }
+
+    return url;
+  }
+
+  void abrirImagem(String url) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VisualizarDocumentoScreen(imageUrl: url),
+      ),
+    );
+  }
+
+  Future<void> abrirFormularioDocumento({
+    Map<String, dynamic>? documento,
+  }) async {
     final editando = documento != null;
 
     final tituloController =
@@ -143,9 +251,13 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     final categoriaController =
         TextEditingController(text: documento?['categoria'] ?? '');
 
-    DateTime? dataValidade = documento?['data_validade'] != null
-        ? DateTime.tryParse(documento!['data_validade'])
-        : null;
+    final dataTexto = documento?['data_validade'];
+    DateTime? dataValidade =
+        dataTexto != null ? DateTime.tryParse(dataTexto.toString()) : null;
+
+    XFile? imagemSelecionada;
+    Uint8List? imagemBytes;
+    bool salvando = false;
 
     await showModalBottomSheet(
       context: context,
@@ -157,6 +269,55 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            Future<void> salvar() async {
+              if (tituloController.text.trim().isEmpty ||
+                  categoriaController.text.trim().isEmpty ||
+                  dataValidade == null ||
+                  (!editando && imagemSelecionada == null)) {
+                mostrarErro(
+                  'Preencha todos os campos e tire a foto do documento.',
+                );
+                return;
+              }
+
+              setModalState(() {
+                salvando = true;
+              });
+
+              try {
+                String? arquivoUrl = documento?['arquivo_url'];
+
+                if (imagemSelecionada != null) {
+                  arquivoUrl = await uploadDocumentoImagem(imagemSelecionada!);
+                }
+
+                if (editando) {
+                  await editarDocumento(
+                    id: documento['id'],
+                    titulo: tituloController.text.trim(),
+                    categoria: categoriaController.text.trim(),
+                    validade: dataValidade!,
+                    arquivoUrl: arquivoUrl,
+                  );
+                } else {
+                  await cadastrarDocumento(
+                    titulo: tituloController.text.trim(),
+                    categoria: categoriaController.text.trim(),
+                    validade: dataValidade!,
+                    arquivoUrl: arquivoUrl,
+                  );
+                }
+
+                if (mounted) Navigator.pop(context);
+              } catch (e) {
+                mostrarErro('Erro ao salvar documento: $e');
+              } finally {
+                setModalState(() {
+                  salvando = false;
+                });
+              }
+            }
+
             return Padding(
               padding: EdgeInsets.only(
                 left: 20,
@@ -224,38 +385,74 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      onTap: () async {
+                        final imagem = await escolherImagem();
+
+                        if (imagem != null) {
+                          final bytes = await imagem.readAsBytes();
+
+                          setModalState(() {
+                            imagemSelecionada = imagem;
+                            imagemBytes = bytes;
+                          });
+                        }
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F7FB),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFDDE3EC)),
+                        ),
+                        child: Column(
+                          children: [
+                            if (imagemBytes != null)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.memory(
+                                  imagemBytes!,
+                                  height: 160,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            else if (editando &&
+                                documento['arquivo_url'] != null)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  documento['arquivo_url'].toString(),
+                                  height: 160,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            else
+                              const Icon(
+                                Icons.camera_alt_rounded,
+                                size: 48,
+                                color: Color(0xFFE87722),
+                              ),
+                            const SizedBox(height: 8),
+                            Text(
+                              imagemSelecionada == null
+                                  ? 'Tirar foto do documento'
+                                  : 'Foto selecionada',
+                              style: const TextStyle(
+                                color: Color(0xFF1A202C),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 22),
                     ElevatedButton(
-                      onPressed: () async {
-                        if (tituloController.text.trim().isEmpty ||
-                            categoriaController.text.trim().isEmpty ||
-                            dataValidade == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Preencha todos os campos.'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          return;
-                        }
-
-                        if (editando) {
-                          await editarDocumento(
-                            id: documento['id'],
-                            titulo: tituloController.text.trim(),
-                            categoria: categoriaController.text.trim(),
-                            validade: dataValidade!,
-                          );
-                        } else {
-                          await cadastrarDocumento(
-                            titulo: tituloController.text.trim(),
-                            categoria: categoriaController.text.trim(),
-                            validade: dataValidade!,
-                          );
-                        }
-
-                        if (mounted) Navigator.pop(context);
-                      },
+                      onPressed: salvando ? null : salvar,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFE87722),
                         foregroundColor: Colors.white,
@@ -264,10 +461,22 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      child: Text(
-                        editando ? 'SALVAR ALTERAÇÕES' : 'LANÇAR DOCUMENTO',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      child: salvando
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              editando
+                                  ? 'SALVAR ALTERAÇÕES'
+                                  : 'LANÇAR DOCUMENTO',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ],
                 ),
@@ -283,41 +492,38 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     required String titulo,
     required String categoria,
     required DateTime validade,
+    required String? arquivoUrl,
   }) async {
     final user = supabase.auth.currentUser;
-    if (user == null) return;
+
+    if (user == null) {
+      throw 'Usuário não autenticado.';
+    }
 
     final usuarioId = isAdmin ? usuarioSelecionadoId : user.id;
 
-    if (usuarioId == null) return;
-
-    try {
-      final status = calcularStatus(validade);
-
-      await supabase.from('documentos').insert({
-        'usuario_id': usuarioId,
-        'titulo': titulo,
-        'categoria': categoria,
-        'data_validade': validade.toIso8601String().split('T').first,
-        'status': status,
-      });
-
-      await carregarDocumentos(usuarioId);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Documento lançado com sucesso.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao lançar documento: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    if (usuarioId == null) {
+      throw 'Usuário selecionado não encontrado.';
     }
+
+    final status = calcularStatus(validade);
+
+    await supabase.from('documentos').insert({
+      'usuario_id': usuarioId,
+      'titulo': titulo,
+      'categoria': categoria,
+      'data_validade': validade.toIso8601String().split('T').first,
+      'status': status,
+      'arquivo_url': arquivoUrl,
+    });
+
+    await carregarDocumentos(usuarioId);
+
+    if (isAdmin) {
+      await carregarUsuariosParaAdmin();
+    }
+
+    mostrarSucesso('Documento lançado com sucesso.');
   }
 
   Future<void> editarDocumento({
@@ -325,35 +531,40 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     required String titulo,
     required String categoria,
     required DateTime validade,
+    required String? arquivoUrl,
   }) async {
-    try {
-      final status = calcularStatus(validade);
+    final status = calcularStatus(validade);
 
-      await supabase.from('documentos').update({
-        'titulo': titulo,
-        'categoria': categoria,
-        'data_validade': validade.toIso8601String().split('T').first,
-        'status': status,
-      }).eq('id', id);
+    await supabase.from('documentos').update({
+      'titulo': titulo,
+      'categoria': categoria,
+      'data_validade': validade.toIso8601String().split('T').first,
+      'status': status,
+      'arquivo_url': arquivoUrl,
+    }).eq('id', id);
 
-      if (usuarioSelecionadoId != null) {
-        await carregarDocumentos(usuarioSelecionadoId!);
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Documento atualizado com sucesso.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao editar documento: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    if (usuarioSelecionadoId != null) {
+      await carregarDocumentos(usuarioSelecionadoId!);
     }
+
+    if (isAdmin) {
+      await carregarUsuariosParaAdmin();
+    }
+
+    mostrarSucesso('Documento atualizado com sucesso.');
+  }
+
+  String? extrairPathStorage(String? arquivoUrl) {
+    if (arquivoUrl == null || arquivoUrl.isEmpty) return null;
+
+    final uri = Uri.parse(arquivoUrl);
+    final index = uri.pathSegments.indexOf('documentos');
+
+    if (index == -1 || index + 1 >= uri.pathSegments.length) {
+      return null;
+    }
+
+    return uri.pathSegments.sublist(index + 1).join('/');
   }
 
   Future<void> excluirDocumento(Map<String, dynamic> documento) async {
@@ -372,6 +583,15 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
               Navigator.pop(context);
 
               try {
+                final pathStorage =
+                    extrairPathStorage(documento['arquivo_url']?.toString());
+
+                if (pathStorage != null) {
+                  await supabase.storage
+                      .from('documentos')
+                      .remove([pathStorage]);
+                }
+
                 await supabase
                     .from('documentos')
                     .delete()
@@ -381,19 +601,13 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                   await carregarDocumentos(usuarioSelecionadoId!);
                 }
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Documento excluído.'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                if (isAdmin) {
+                  await carregarUsuariosParaAdmin();
+                }
+
+                mostrarSucesso('Documento excluído completamente.');
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro ao excluir: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                mostrarErro('Erro ao excluir: $e');
               }
             },
             child: const Text('Excluir'),
@@ -435,8 +649,31 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     );
   }
 
+  Widget statusChip(String texto, Color cor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: cor.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        texto,
+        style: TextStyle(
+          color: cor,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
   Widget usuarioCard(Map<String, dynamic> usuario) {
-    final total = totalDocsPorUsuario[usuario['id']] ?? 0;
+    final resumo = resumoPorUsuario[usuario['id']] ?? {};
+
+    final regular = resumo['Regular'] ?? 0;
+    final aVencer = resumo['A vencer'] ?? 0;
+    final vencido = resumo['Vencido'] ?? 0;
+    final total = regular + aVencer + vencido;
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -457,8 +694,19 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: vencido > 0
+              ? const Color(0xFFFFF5F5)
+              : aVencer > 0
+                  ? const Color(0xFFFFFAF0)
+                  : Colors.white,
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: vencido > 0
+                ? const Color(0xFFE53935).withOpacity(0.25)
+                : aVencer > 0
+                    ? const Color(0xFFE87722).withOpacity(0.25)
+                    : Colors.transparent,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.06),
@@ -467,66 +715,100 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
             ),
           ],
         ),
-        child: Row(
+        child: Column(
           children: [
-            const CircleAvatar(
-              radius: 26,
-              backgroundColor: Color(0xFFE8F5E9),
-              child: Icon(
-                Icons.person,
-                color: Color(0xFF43A047),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    usuario['nome'] ?? '',
-                    style: const TextStyle(
-                      color: Color(0xFF1A202C),
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    usuario['cargo'] ?? 'Sem cargo',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Matrícula: ${usuario['matricula']}',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Column(
+            Row(
               children: [
-                Text(
-                  total.toString(),
-                  style: const TextStyle(
-                    color: Color(0xFFE87722),
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: vencido > 0
+                      ? const Color(0xFFE53935).withOpacity(0.12)
+                      : aVencer > 0
+                          ? const Color(0xFFE87722).withOpacity(0.12)
+                          : const Color(0xFFE8F5E9),
+                  child: Icon(
+                    vencido > 0
+                        ? Icons.warning_rounded
+                        : aVencer > 0
+                            ? Icons.schedule_rounded
+                            : Icons.person,
+                    color: vencido > 0
+                        ? const Color(0xFFE53935)
+                        : aVencer > 0
+                            ? const Color(0xFFE87722)
+                            : const Color(0xFF43A047),
                   ),
                 ),
-                const Text(
-                  'docs',
-                  style: TextStyle(
-                    color: Color(0xFFE87722),
-                    fontSize: 12,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        usuario['nome'] ?? '',
+                        style: const TextStyle(
+                          color: Color(0xFF1A202C),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        usuario['cargo'] ?? 'Sem cargo',
+                        style: const TextStyle(
+                          color: Color(0xFF718096),
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Matrícula: ${usuario['matricula']}',
+                        style: const TextStyle(
+                          color: Color(0xFF718096),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+                Column(
+                  children: [
+                    Text(
+                      total.toString(),
+                      style: const TextStyle(
+                        color: Color(0xFFE87722),
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'docs',
+                      style: TextStyle(
+                        color: Color(0xFFE87722),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (regular > 0)
+                    statusChip('$regular regular', const Color(0xFF43A047)),
+                  if (aVencer > 0)
+                    statusChip('$aVencer a vencer', const Color(0xFFE87722)),
+                  if (vencido > 0)
+                    statusChip('$vencido vencido', const Color(0xFFE53935)),
+                  if (total == 0)
+                    statusChip('sem documentos', const Color(0xFF718096)),
+                ],
+              ),
             ),
           ],
         ),
@@ -542,8 +824,10 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     DateTime? validade;
 
     if (validadeString != null) {
-      validade = DateTime.tryParse(validadeString);
+      validade = DateTime.tryParse(validadeString.toString());
     }
+
+    final arquivoUrl = documento['arquivo_url']?.toString();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -555,49 +839,75 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: cor.withOpacity(0.15),
-            child: Icon(Icons.description, color: cor),
+          GestureDetector(
+            onTap: arquivoUrl != null ? () => abrirImagem(arquivoUrl) : null,
+            child: arquivoUrl != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      arquivoUrl,
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : CircleAvatar(
+                    backgroundColor: cor.withOpacity(0.15),
+                    child: Icon(Icons.description, color: cor),
+                  ),
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  documento['titulo'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF1A202C),
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
+            child: GestureDetector(
+              onTap: arquivoUrl != null ? () => abrirImagem(arquivoUrl) : null,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    documento['titulo'] ?? '',
+                    style: const TextStyle(
+                      color: Color(0xFF1A202C),
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  documento['categoria'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF718096),
-                    fontSize: 13,
+                  const SizedBox(height: 4),
+                  Text(
+                    documento['categoria'] ?? '',
+                    style: const TextStyle(
+                      color: Color(0xFF718096),
+                      fontSize: 13,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(Icons.calendar_today, size: 14, color: cor),
-                    const SizedBox(width: 6),
-                    Text(
-                      validade == null
-                          ? 'Sem validade'
-                          : 'Válido até ${formatarData(validade)}',
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 14, color: cor),
+                      const SizedBox(width: 6),
+                      Text(
+                        validade == null
+                            ? 'Sem validade'
+                            : 'Válido até ${formatarData(validade)}',
+                        style: TextStyle(
+                          color: cor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (arquivoUrl != null) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Toque para abrir imagem',
                       style: TextStyle(
-                        color: cor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF718096),
+                        fontSize: 11,
                       ),
                     ),
                   ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           Column(
@@ -620,6 +930,10 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
               ),
               PopupMenuButton<String>(
                 onSelected: (value) {
+                  if (value == 'abrir' && arquivoUrl != null) {
+                    abrirImagem(arquivoUrl);
+                  }
+
                   if (value == 'editar') {
                     abrirFormularioDocumento(documento: documento);
                   }
@@ -628,12 +942,17 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                     excluirDocumento(documento);
                   }
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
+                itemBuilder: (_) => [
+                  if (arquivoUrl != null)
+                    const PopupMenuItem(
+                      value: 'abrir',
+                      child: Text('Abrir imagem'),
+                    ),
+                  const PopupMenuItem(
                     value: 'editar',
                     child: Text('Editar'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'excluir',
                     child: Text('Excluir'),
                   ),
@@ -762,13 +1081,57 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
               onPressed: () => abrirFormularioDocumento(),
               backgroundColor: const Color(0xFFE87722),
               foregroundColor: Colors.white,
-              child: const Icon(Icons.add),
+              child: const Icon(Icons.camera_alt_rounded),
             ),
       body: carregando
           ? const Center(child: CircularProgressIndicator())
           : adminNaListaUsuarios
               ? listaUsuariosAdmin()
               : listaDocumentos(),
+    );
+  }
+}
+
+class VisualizarDocumentoScreen extends StatelessWidget {
+  final String imageUrl;
+
+  const VisualizarDocumentoScreen({
+    super.key,
+    required this.imageUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text(
+          'Visualizar documento',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5,
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return const CircularProgressIndicator(color: Colors.white);
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return const Text(
+                'Erro ao carregar imagem.',
+                style: TextStyle(color: Colors.white),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }
