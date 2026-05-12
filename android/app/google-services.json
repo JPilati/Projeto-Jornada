@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "395359559014",
+    "project_id": "guindastes-ribasdb",
+    "storage_bucket": "guindastes-ribasdb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:395359559014:android:b394c35f03cfc3b2a7fca7",
+        "android_client_info": {
+          "package_name": "com.example.hub_digital_ribas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlUbUH-UHJ5CY-q2xeisPPd87Vxb-8kBc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

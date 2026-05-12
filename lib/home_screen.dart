@@ -1,9 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'firebase_service.dart';
 import 'mapa_screen.dart';
 import 'documentos_screen.dart';
-import 'qr_code_screen.dart';
 import 'main.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -14,8 +14,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final supabase = Supabase.instance.client;
-
   String nomeUsuario = 'Operador';
   bool carregandoNome = true;
 
@@ -26,24 +24,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> carregarNomeUsuario() async {
-    final user = supabase.auth.currentUser;
-
-    if (user == null) {
-      setState(() {
-        carregandoNome = false;
-      });
-      return;
-    }
-
     try {
-      final profile = await supabase
-          .from('profiles')
-          .select('nome')
-          .eq('id', user.id)
-          .single();
+      final profile = await FirebaseService.buscarMeuPerfil();
 
       setState(() {
-        nomeUsuario = profile['nome'] ?? 'Operador';
+        nomeUsuario = profile?['nome'] ?? 'Operador';
         carregandoNome = false;
       });
     } catch (_) {
@@ -53,8 +38,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _logout(BuildContext context) async {
-    await supabase.auth.signOut();
+  Future<void> _logout(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+
+    if (!context.mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
@@ -228,21 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const MapaScreen()),
-                        );
-                      },
-                    ),
-                    _buildFeatureCard(
-                      icon: Icons.qr_code_scanner,
-                      title: 'QR Code',
-                      subtitle: 'Escanear',
-                      iconBgColor: Colors.red.shade100,
-                      iconColor: Colors.red,
-                      onTap: () {
-                        Navigator.push(
-                          context,
                           MaterialPageRoute(
-                            builder: (_) => const QrCodeScreen(),
+                            builder: (_) => const MapaScreen(),
                           ),
                         );
                       },

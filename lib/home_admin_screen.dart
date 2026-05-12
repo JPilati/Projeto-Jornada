@@ -1,5 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart';
 import 'equipamentos_screen.dart';
@@ -14,7 +15,7 @@ class HomeAdminScreen extends StatefulWidget {
 }
 
 class _HomeAdminScreenState extends State<HomeAdminScreen> {
-  final supabase = Supabase.instance.client;
+  final db = FirebaseFirestore.instance;
 
   int totalColaboradores = 0;
   int equipamentosAtivos = 0;
@@ -24,6 +25,9 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
   List<Map<String, dynamic>> docsOperadorAVencer = [];
   List<Map<String, dynamic>> docsEquipamentoVencidos = [];
   List<Map<String, dynamic>> docsEquipamentoAVencer = [];
+
+  Map<String, String> nomesUsuarios = {};
+  Map<String, String> nomesEquipamentos = {};
 
   @override
   void initState() {
@@ -39,30 +43,29 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
 
   Future<void> carregarDadosDashboard() async {
     try {
-      final colaboradores = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('perfil', 'Operador')
-          .eq('status', 'Ativo');
+      final colaboradoresSnapshot = await db
+          .collection('users')
+          .where('perfil', isEqualTo: 'Operador')
+          .where('status', isEqualTo: 'Ativo')
+          .get();
 
-      final equipamentos = await supabase.from('equipamentos').select('status');
+      final equipamentosSnapshot = await db.collection('equipamentos').get();
 
-      final documentos = await supabase.from('documentos').select('''
-        id,
-        titulo,
-        categoria,
-        data_validade,
-        status,
-        arquivo_url,
-        usuario_id,
-        equipamento_id,
-        profiles (
-          nome
-        ),
-        equipamentos (
-          nome
-        )
-      ''');
+      final documentosSnapshot = await db.collection('documentos').get();
+
+      final usuariosSnapshot = await db.collection('users').get();
+
+      final Map<String, String> usuariosMap = {};
+      for (final doc in usuariosSnapshot.docs) {
+        final data = doc.data();
+        usuariosMap[doc.id] = data['nome'] ?? 'Operador';
+      }
+
+      final Map<String, String> equipamentosMap = {};
+      for (final doc in equipamentosSnapshot.docs) {
+        final data = doc.data();
+        equipamentosMap[doc.id] = data['nome'] ?? 'Equipamento';
+      }
 
       final hoje = DateTime.now();
       final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
@@ -73,8 +76,10 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
       final equipamentoVencidos = <Map<String, dynamic>>[];
       final equipamentoAVencer = <Map<String, dynamic>>[];
 
-      for (final doc in documentos) {
-        final dataTexto = doc['data_validade'];
+      for (final doc in documentosSnapshot.docs) {
+        final data = doc.data();
+
+        final dataTexto = data['dataValidade'];
         if (dataTexto == null) continue;
 
         final validade = DateTime.tryParse(dataTexto.toString());
@@ -83,43 +88,57 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
         final validadeSemHora =
             DateTime(validade.year, validade.month, validade.day);
 
-        final isEquipamento = doc['equipamento_id'] != null;
+        final documentoCompleto = {
+          'id': doc.id,
+          ...data,
+        };
+
+        final isEquipamento = data['equipamentoId'] != null;
 
         if (validadeSemHora.isBefore(hojeSemHora)) {
           if (isEquipamento) {
-            equipamentoVencidos.add(Map<String, dynamic>.from(doc));
+            equipamentoVencidos.add(documentoCompleto);
           } else {
-            operadorVencidos.add(Map<String, dynamic>.from(doc));
+            operadorVencidos.add(documentoCompleto);
           }
         } else if (validadeSemHora.isBefore(limite) ||
             validadeSemHora.isAtSameMomentAs(limite)) {
           if (isEquipamento) {
-            equipamentoAVencer.add(Map<String, dynamic>.from(doc));
+            equipamentoAVencer.add(documentoCompleto);
           } else {
-            operadorAVencer.add(Map<String, dynamic>.from(doc));
+            operadorAVencer.add(documentoCompleto);
           }
         }
       }
 
       setState(() {
-        totalColaboradores = colaboradores.length;
-        equipamentosAtivos =
-            equipamentos.where((e) => e['status'] == 'Ativo').length;
-        equipamentosManutencao =
-            equipamentos.where((e) => e['status'] == 'Manutenção').length;
+        totalColaboradores = colaboradoresSnapshot.docs.length;
+
+        equipamentosAtivos = equipamentosSnapshot.docs
+            .where((e) => e.data()['status'] == 'Ativo')
+            .length;
+
+        equipamentosManutencao = equipamentosSnapshot.docs
+            .where((e) => e.data()['status'] == 'Manutenção')
+            .length;
 
         docsOperadorVencidos = operadorVencidos;
         docsOperadorAVencer = operadorAVencer;
         docsEquipamentoVencidos = equipamentoVencidos;
         docsEquipamentoAVencer = equipamentoAVencer;
+
+        nomesUsuarios = usuariosMap;
+        nomesEquipamentos = equipamentosMap;
       });
     } catch (e) {
       debugPrint('Erro dashboard: $e');
     }
   }
 
-  void _logout(BuildContext context) async {
-    await supabase.auth.signOut();
+  Future<void> _logout(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+
+    if (!context.mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
@@ -142,17 +161,22 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
   }
 
   String nomeOrigemDocumento(Map<String, dynamic> doc) {
-    if (doc['equipamento_id'] != null) {
-      final equipamento = doc['equipamentos'];
-      return equipamento != null ? equipamento['nome'] ?? 'Equipamento' : 'Equipamento';
+    final equipamentoId = doc['equipamentoId'];
+    final usuarioId = doc['usuarioId'];
+
+    if (equipamentoId != null) {
+      return nomesEquipamentos[equipamentoId] ?? 'Equipamento';
     }
 
-    final profile = doc['profiles'];
-    return profile != null ? profile['nome'] ?? 'Operador' : 'Operador';
+    if (usuarioId != null) {
+      return nomesUsuarios[usuarioId] ?? 'Operador';
+    }
+
+    return 'Não vinculado';
   }
 
   void abrirDocumentoNotificacao(Map<String, dynamic> doc) {
-    final arquivoUrl = doc['arquivo_url']?.toString();
+    final arquivoUrl = doc['arquivoUrl']?.toString();
 
     showModalBottomSheet(
       context: context,
@@ -198,14 +222,14 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                 const SizedBox(height: 18),
                 _linhaDetalhe(
                   'Tipo',
-                  doc['equipamento_id'] != null
+                  doc['equipamentoId'] != null
                       ? 'Documento de equipamento'
                       : 'Documento de operador',
                 ),
                 _linhaDetalhe('Vinculado a', nomeOrigemDocumento(doc)),
                 _linhaDetalhe(
                   'Validade',
-                  formatarData(doc['data_validade']?.toString()),
+                  formatarData(doc['dataValidade']?.toString()),
                 ),
                 _linhaDetalhe('Status', doc['status'] ?? '-'),
                 const SizedBox(height: 18),
@@ -228,8 +252,9 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) =>
-                                  VisualizarDocumentoScreen(imageUrl: arquivoUrl),
+                              builder: (_) => VisualizarDocumentoScreen(
+                                imageUrl: arquivoUrl,
+                              ),
                             ),
                           );
                         },
@@ -379,104 +404,96 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
   }
 
   void abrirMenuNotificacoes() {
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: const Color(0xFFF4F7FB),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
-    builder: (_) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD0D7E2),
-                    borderRadius: BorderRadius.circular(10),
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFFF4F7FB),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD0D7E2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 22),
-              const Text(
-                'Notificações',
-                style: TextStyle(
-                  color: Color(0xFF1A202C),
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+                const SizedBox(height: 22),
+                const Text(
+                  'Notificações',
+                  style: TextStyle(
+                    color: Color(0xFF1A202C),
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                totalNotificacoes == 0
-                    ? 'Nenhuma pendência no momento.'
-                    : '$totalNotificacoes pendência(s) encontrada(s).',
-                style: const TextStyle(
-                  color: Color(0xFF718096),
-                  fontSize: 14,
+                const SizedBox(height: 6),
+                Text(
+                  totalNotificacoes == 0
+                      ? 'Nenhuma pendência no momento.'
+                      : '$totalNotificacoes pendência(s) encontrada(s).',
+                  style: const TextStyle(
+                    color: Color(0xFF718096),
+                    fontSize: 14,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 22),
-
-              // 🔥 OPERADORES VENCIDOS
-              if (docsOperadorVencidos.isNotEmpty) ...[
-                _buildGrupoNotificacao(
-                  titulo: 'Operadores — vencidos',
-                  subtitulo: 'Documentos de funcionários vencidos',
-                  documentos: docsOperadorVencidos,
-                  cor: const Color(0xFFE53935),
-                  icone: Icons.person_off_rounded,
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 22),
+                if (docsOperadorVencidos.isNotEmpty) ...[
+                  _buildGrupoNotificacao(
+                    titulo: 'Operadores — vencidos',
+                    subtitulo: 'Documentos de funcionários vencidos',
+                    documentos: docsOperadorVencidos,
+                    cor: const Color(0xFFE53935),
+                    icone: Icons.person_off_rounded,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (docsOperadorAVencer.isNotEmpty) ...[
+                  _buildGrupoNotificacao(
+                    titulo: 'Operadores — a vencer',
+                    subtitulo: 'Documentos de funcionários em até 30 dias',
+                    documentos: docsOperadorAVencer,
+                    cor: const Color(0xFFE87722),
+                    icone: Icons.person_search_rounded,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (docsEquipamentoVencidos.isNotEmpty) ...[
+                  _buildGrupoNotificacao(
+                    titulo: 'Equipamentos — vencidos',
+                    subtitulo: 'Documentos de veículos/equipamentos vencidos',
+                    documentos: docsEquipamentoVencidos,
+                    cor: const Color(0xFFE53935),
+                    icone: Icons.precision_manufacturing_rounded,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (docsEquipamentoAVencer.isNotEmpty) ...[
+                  _buildGrupoNotificacao(
+                    titulo: 'Equipamentos — a vencer',
+                    subtitulo:
+                        'Documentos de veículos/equipamentos em até 30 dias',
+                    documentos: docsEquipamentoAVencer,
+                    cor: const Color(0xFFE87722),
+                    icone: Icons.build_circle_outlined,
+                  ),
+                ],
               ],
-
-              // 🔥 OPERADORES A VENCER
-              if (docsOperadorAVencer.isNotEmpty) ...[
-                _buildGrupoNotificacao(
-                  titulo: 'Operadores — a vencer',
-                  subtitulo: 'Documentos de funcionários em até 30 dias',
-                  documentos: docsOperadorAVencer,
-                  cor: const Color(0xFFE87722),
-                  icone: Icons.person_search_rounded,
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // 🔥 EQUIPAMENTOS VENCIDOS
-              if (docsEquipamentoVencidos.isNotEmpty) ...[
-                _buildGrupoNotificacao(
-                  titulo: 'Equipamentos — vencidos',
-                  subtitulo: 'Documentos de veículos/equipamentos vencidos',
-                  documentos: docsEquipamentoVencidos,
-                  cor: const Color(0xFFE53935),
-                  icone: Icons.precision_manufacturing_rounded,
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // 🔥 EQUIPAMENTOS A VENCER
-              if (docsEquipamentoAVencer.isNotEmpty) ...[
-                _buildGrupoNotificacao(
-                  titulo: 'Equipamentos — a vencer',
-                  subtitulo:
-                      'Documentos de veículos/equipamentos em até 30 dias',
-                  documentos: docsEquipamentoAVencer,
-                  cor: const Color(0xFFE87722),
-                  icone: Icons.build_circle_outlined,
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   Widget _buildGrupoNotificacao({
     required String titulo,
@@ -569,7 +586,7 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                         ),
                       ),
                       Text(
-                        formatarData(doc['data_validade']?.toString()),
+                        formatarData(doc['dataValidade']?.toString()),
                         style: TextStyle(
                           color: cor,
                           fontSize: 12,

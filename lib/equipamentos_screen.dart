@@ -1,5 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'equipamento_detalhes_screen.dart';
 
@@ -11,7 +11,7 @@ class EquipamentosScreen extends StatefulWidget {
 }
 
 class _EquipamentosScreenState extends State<EquipamentosScreen> {
-  final supabase = Supabase.instance.client;
+  final db = FirebaseFirestore.instance;
 
   bool carregando = true;
   List<Map<String, dynamic>> equipamentos = [];
@@ -24,13 +24,16 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
 
   Future<void> carregarEquipamentos() async {
     try {
-      final data = await supabase
-          .from('equipamentos')
-          .select()
-          .order('nome', ascending: true);
+      final snapshot = await db.collection('equipamentos').orderBy('nome').get();
 
       setState(() {
-        equipamentos = List<Map<String, dynamic>>.from(data);
+        equipamentos = snapshot.docs.map((doc) {
+          return {
+            'id': doc.id,
+            ...doc.data(),
+          };
+        }).toList();
+
         carregando = false;
       });
     } catch (e) {
@@ -38,13 +41,26 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         carregando = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar equipamentos: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao carregar equipamentos: $e');
     }
+  }
+
+  void mostrarErro(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void mostrarSucesso(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   InputDecoration inputDecoration(String label) {
@@ -149,44 +165,45 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                         if (nomeController.text.trim().isEmpty ||
                             tipoController.text.trim().isEmpty ||
                             placaController.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Preencha os campos principais.'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
+                          mostrarErro('Preencha os campos principais.');
                           return;
                         }
 
                         try {
                           if (editando) {
-                            await supabase.from('equipamentos').update({
+                            await db
+                                .collection('equipamentos')
+                                .doc(equipamento['id'])
+                                .update({
                               'nome': nomeController.text.trim(),
                               'tipo': tipoController.text.trim(),
                               'placa': placaController.text.trim(),
                               'capacidade': capacidadeController.text.trim(),
                               'status': statusSelecionado,
-                            }).eq('id', equipamento['id']);
+                              'updatedAt': FieldValue.serverTimestamp(),
+                            });
                           } else {
-                            await supabase.from('equipamentos').insert({
+                            await db.collection('equipamentos').add({
                               'nome': nomeController.text.trim(),
                               'tipo': tipoController.text.trim(),
                               'placa': placaController.text.trim(),
                               'capacidade': capacidadeController.text.trim(),
                               'status': statusSelecionado,
+                              'createdAt': FieldValue.serverTimestamp(),
                             });
                           }
 
                           await carregarEquipamentos();
 
                           if (mounted) Navigator.pop(context);
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Erro ao salvar veículo: $e'),
-                              backgroundColor: Colors.red,
-                            ),
+
+                          mostrarSucesso(
+                            editando
+                                ? 'Veículo atualizado com sucesso.'
+                                : 'Veículo cadastrado com sucesso.',
                           );
+                        } catch (e) {
+                          mostrarErro('Erro ao salvar veículo: $e');
                         }
                       },
                       style: ElevatedButton.styleFrom(
@@ -234,26 +251,29 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
               Navigator.pop(context);
 
               try {
-                await supabase
-                    .from('equipamentos')
-                    .delete()
-                    .eq('id', equipamento['id']);
+                final docs = await db
+                    .collection('documentos')
+                    .where('equipamentoId', isEqualTo: equipamento['id'])
+                    .where('tipo', isEqualTo: 'equipamento')
+                    .get();
+
+                if (docs.docs.isNotEmpty) {
+                  mostrarErro(
+                    'Não é possível excluir: este veículo possui documentos vinculados.',
+                  );
+                  return;
+                }
+
+                await db
+                    .collection('equipamentos')
+                    .doc(equipamento['id'])
+                    .delete();
 
                 await carregarEquipamentos();
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Veículo excluído.'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                mostrarSucesso('Veículo excluído.');
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro ao excluir: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                mostrarErro('Erro ao excluir: $e');
               }
             },
             child: const Text('Excluir'),
@@ -382,6 +402,38 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
     );
   }
 
+  Widget _resumoCard(String valor, String label, Color cor) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: cor.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Text(
+              valor,
+              style: TextStyle(
+                color: cor,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              label,
+              style: TextStyle(
+                color: cor,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ativos =
@@ -456,38 +508,6 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                 ),
               ],
             ),
-    );
-  }
-
-  Widget _resumoCard(String valor, String label, Color cor) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            Text(
-              valor,
-              style: TextStyle(
-                color: cor,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Text(
-              label,
-              style: TextStyle(
-                color: cor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

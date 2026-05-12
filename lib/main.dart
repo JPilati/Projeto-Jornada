@@ -1,5 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart' hide FirebaseService;
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'firebase_options.dart';
+import 'firebase_service.dart';
 
 import 'home_screen.dart';
 import 'home_admin_screen.dart';
@@ -8,9 +13,8 @@ import 'alterar_senha_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: 'https://mxecasxsghuimdirtnhc.supabase.co',
-    anonKey: 'sb_publishable_xQioOh6azAYq_KchXTs5Bw_P6FyfQqZ',
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
   );
 
   runApp(const HubDigitalApp());
@@ -45,8 +49,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final senhaController = TextEditingController();
 
   bool ocultarSenha = true;
-
-  final supabase = Supabase.instance.client;
+  bool carregando = false;
 
   @override
   void dispose() {
@@ -59,32 +62,56 @@ class _LoginScreenState extends State<LoginScreen> {
     final matricula = matriculaController.text.trim();
     final senha = senhaController.text.trim();
 
+    if (matricula.isEmpty || senha.isEmpty) {
+      mostrarErro('Informe matrícula e senha.');
+      return;
+    }
+
+    setState(() {
+      carregando = true;
+    });
+
     try {
-      final response = await supabase.auth.signInWithPassword(
-        email: '$matricula@app.com',
+      final email = FirebaseService.emailPorMatricula(matricula);
+
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
         password: senha,
       );
 
-      final user = response.user;
+      final user = credential.user;
 
       if (user == null) {
-        throw 'Usuário não encontrado';
+        throw Exception('Usuário não encontrado.');
       }
 
-      final profile = await supabase
-          .from('profiles')
-          .select()
-          .eq('id', user.id)
-          .single();
+      final profileDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!profileDoc.exists) {
+        throw Exception('Perfil do usuário não encontrado.');
+      }
+
+      final profile = profileDoc.data()!;
 
       final perfil = profile['perfil'];
-      final precisaTrocarSenha = profile['precisa_trocar_senha'];
+      final status = profile['status'];
+      final precisaTrocarSenha = profile['precisaTrocarSenha'] == true;
 
-      if (precisaTrocarSenha == true) {
+      if (status == 'Inativo') {
+        await FirebaseAuth.instance.signOut();
+        throw Exception('Usuário inativo. Procure o administrador.');
+      }
+
+      if (!mounted) return;
+
+      if (precisaTrocarSenha) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => AlterarSenhaScreen(user: user),
+            builder: (_) => const AlterarSenhaScreen(),
           ),
         );
         return;
@@ -93,22 +120,36 @@ class _LoginScreenState extends State<LoginScreen> {
       if (perfil == 'Administrador') {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomeAdminScreen()),
+          MaterialPageRoute(
+            builder: (_) => const HomeAdminScreen(),
+          ),
         );
       } else {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(
+            builder: (_) => const HomeScreen(),
+          ),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao logar: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao logar: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          carregando = false;
+        });
+      }
     }
+  }
+
+  void mostrarErro(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   @override
@@ -117,7 +158,6 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 🔵 LOGO
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -141,13 +181,13 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
             ),
-
-            // ⚪ FORMULÁRIO
             Container(
               padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -161,7 +201,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-
                   TextField(
                     controller: matriculaController,
                     keyboardType: TextInputType.number,
@@ -175,9 +214,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 16),
-
                   const Text(
                     'Senha',
                     style: TextStyle(
@@ -187,7 +224,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-
                   TextField(
                     controller: senhaController,
                     obscureText: ocultarSenha,
@@ -213,20 +249,27 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   ElevatedButton(
-                    onPressed: realizarLogin,
+                    onPressed: carregando ? null : realizarLogin,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1976D2),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
-                    child: const Text(
-                      'ENTRAR NO SISTEMA',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
+                    child: carregando
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'ENTRAR NO SISTEMA',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ],
               ),

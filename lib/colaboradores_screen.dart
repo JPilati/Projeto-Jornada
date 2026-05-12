@@ -1,5 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart' hide FirebaseService;
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'firebase_options.dart';
+import 'firebase_service.dart';
 
 class ColaboradoresScreen extends StatefulWidget {
   const ColaboradoresScreen({super.key});
@@ -9,7 +14,7 @@ class ColaboradoresScreen extends StatefulWidget {
 }
 
 class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
-  final supabase = Supabase.instance.client;
+  final db = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> colaboradores = [];
   bool carregando = true;
@@ -22,13 +27,17 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
 
   Future<void> carregarColaboradores() async {
     try {
-      final data = await supabase
-          .from('profiles')
-          .select()
-          .order('nome', ascending: true);
+      final snapshot =
+          await db.collection('users').orderBy('nome').get();
 
       setState(() {
-        colaboradores = List<Map<String, dynamic>>.from(data);
+        colaboradores = snapshot.docs.map((doc) {
+          return {
+            'id': doc.id,
+            ...doc.data(),
+          };
+        }).toList();
+
         carregando = false;
       });
     } catch (e) {
@@ -36,13 +45,26 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
         carregando = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar colaboradores: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao carregar colaboradores: $e');
     }
+  }
+
+  void mostrarErro(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void mostrarSucesso(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   void _abrirFormularioCadastro({Map<String, dynamic>? usuarioEditando}) {
@@ -168,11 +190,14 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                             cargoController.text.trim().isEmpty ||
                             (!editando &&
                                 senhaController.text.trim().isEmpty)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Preencha todos os campos.'),
-                              backgroundColor: Colors.red,
-                            ),
+                          mostrarErro('Preencha todos os campos.');
+                          return;
+                        }
+
+                        if (!editando &&
+                            senhaController.text.trim().length < 6) {
+                          mostrarErro(
+                            'A senha provisória deve ter pelo menos 6 caracteres.',
                           );
                           return;
                         }
@@ -229,47 +254,53 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     required String perfil,
     required String status,
   }) async {
+    FirebaseApp? secondaryApp;
+
     try {
-      final response = await supabase.auth.signUp(
-        email: '$matricula@app.com',
+      secondaryApp = await Firebase.initializeApp(
+        name: 'SecondaryApp${DateTime.now().millisecondsSinceEpoch}',
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+
+      final credential = await secondaryAuth.createUserWithEmailAndPassword(
+        email: FirebaseService.emailPorMatricula(matricula),
         password: senha,
       );
 
-      final user = response.user;
+      final user = credential.user;
 
       if (user == null) {
-        throw 'Não foi possível criar o usuário no Auth.';
+        throw Exception('Não foi possível criar o usuário no Auth.');
       }
 
-      await supabase.from('profiles').insert({
-        'id': user.id,
+      await db.collection('users').doc(user.uid).set({
         'nome': nome,
         'matricula': matricula,
         'cargo': cargo,
         'perfil': perfil,
         'status': status,
-        'precisa_trocar_senha': true,
+        'precisaTrocarSenha': true,
+        'createdAt': FieldValue.serverTimestamp(),
       });
+
+      await secondaryAuth.signOut();
+      await secondaryApp.delete();
 
       await carregarColaboradores();
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Usuário cadastrado com sucesso.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      mostrarSucesso('Usuário cadastrado com sucesso.');
     } catch (e) {
+      try {
+        await secondaryApp?.delete();
+      } catch (_) {}
+
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao cadastrar usuário: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao cadastrar usuário: $e');
     }
   }
 
@@ -281,32 +312,22 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     required String status,
   }) async {
     try {
-      await supabase.from('profiles').update({
+      await db.collection('users').doc(id).update({
         'nome': nome,
         'cargo': cargo,
         'perfil': perfil,
         'status': status,
-      }).eq('id', id);
+      });
 
       await carregarColaboradores();
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Usuário atualizado com sucesso.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      mostrarSucesso('Usuário atualizado com sucesso.');
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao editar usuário: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao editar usuário: $e');
     }
   }
 
@@ -314,18 +335,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     final novoStatus = usuario['status'] == 'Ativo' ? 'Inativo' : 'Ativo';
 
     try {
-      await supabase.from('profiles').update({
+      await db.collection('users').doc(usuario['id']).update({
         'status': novoStatus,
-      }).eq('id', usuario['id']);
+      });
 
       await carregarColaboradores();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao alterar status: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      mostrarErro('Erro ao alterar status: $e');
     }
   }
 
@@ -345,30 +361,17 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               Navigator.pop(context);
 
               try {
-                await supabase
-                    .from('profiles')
-                    .delete()
-                    .eq('id', usuario['id']);
+                await db.collection('users').doc(usuario['id']).delete();
 
                 await carregarColaboradores();
 
                 if (!mounted) return;
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Usuário removido da lista.'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                mostrarSucesso('Usuário removido da lista.');
               } catch (e) {
                 if (!mounted) return;
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro ao excluir usuário: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                mostrarErro('Erro ao excluir usuário: $e');
               }
             },
             child: const Text('Excluir'),
@@ -462,7 +465,7 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                     fontSize: 12,
                   ),
                 ),
-                if (usuario['precisa_trocar_senha'] == true)
+                if (usuario['precisaTrocarSenha'] == true)
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: Text(
@@ -482,8 +485,10 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: _perfilColor(perfil).withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
@@ -499,8 +504,10 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               ),
               const SizedBox(height: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: _statusColor(status).withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
@@ -644,7 +651,6 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               ],
             ),
           ),
-
           Expanded(
             child: carregando
                 ? const Center(

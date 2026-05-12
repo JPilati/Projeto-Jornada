@@ -1,9 +1,10 @@
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EquipamentoDetalhesScreen extends StatefulWidget {
   final String equipamentoId;
@@ -19,7 +20,8 @@ class EquipamentoDetalhesScreen extends StatefulWidget {
 }
 
 class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
-  final supabase = Supabase.instance.client;
+  final db = FirebaseFirestore.instance;
+  final storage = FirebaseStorage.instance;
   final picker = ImagePicker();
 
   bool carregando = true;
@@ -34,21 +36,43 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
   Future<void> carregarDados() async {
     try {
-      final equipamentoData = await supabase
-          .from('equipamentos')
-          .select()
-          .eq('id', widget.equipamentoId)
-          .single();
+      final equipamentoDoc =
+          await db.collection('equipamentos').doc(widget.equipamentoId).get();
 
-      final documentosData = await supabase
-          .from('documentos')
-          .select()
-          .eq('equipamento_id', widget.equipamentoId)
-          .order('criado_em', ascending: false);
+      if (!equipamentoDoc.exists) {
+        throw Exception('Veículo não encontrado.');
+      }
+
+      final documentosSnapshot = await db
+          .collection('documentos')
+          .where('equipamentoId', isEqualTo: widget.equipamentoId)
+          .where('tipo', isEqualTo: 'equipamento')
+          .get();
+
+      final listaDocs = documentosSnapshot.docs.map((doc) {
+        return {
+          'id': doc.id,
+          ...doc.data(),
+        };
+      }).toList();
+
+      listaDocs.sort((a, b) {
+        final aCreated = a['createdAt'];
+        final bCreated = b['createdAt'];
+
+        if (aCreated is Timestamp && bCreated is Timestamp) {
+          return bCreated.compareTo(aCreated);
+        }
+
+        return 0;
+      });
 
       setState(() {
-        equipamento = equipamentoData;
-        documentos = List<Map<String, dynamic>>.from(documentosData);
+        equipamento = {
+          'id': equipamentoDoc.id,
+          ...equipamentoDoc.data()!,
+        };
+        documentos = listaDocs;
         carregando = false;
       });
     } catch (e) {
@@ -80,7 +104,11 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
   String calcularStatus(DateTime validade) {
     final hoje = DateTime.now();
-    final dias = validade.difference(hoje).inDays;
+    final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
+    final validadeSemHora =
+        DateTime(validade.year, validade.month, validade.day);
+
+    final dias = validadeSemHora.difference(hojeSemHora).inDays;
 
     if (dias < 0) return 'Vencido';
     if (dias <= 30) return 'A vencer';
@@ -126,42 +154,37 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     );
   }
 
-  Future<String?> uploadDocumentoImagem(XFile imagem) async {
-    final user = supabase.auth.currentUser;
-
-    if (user == null) {
-      throw 'Usuário não autenticado.';
-    }
-
+  Future<Map<String, String>> uploadDocumentoImagem(XFile imagem) async {
     final bytes = await imagem.readAsBytes();
 
-    final nomeArquivo =
-        '${user.id}/equipamentos/${widget.equipamentoId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final arquivoPath =
+        'equipamentos/${widget.equipamentoId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    await supabase.storage
-        .from('documentos')
-        .uploadBinary(
-          nomeArquivo,
-          bytes,
-          fileOptions: const FileOptions(
-            contentType: 'image/jpeg',
-            upsert: true,
-          ),
-        )
-        .timeout(
-      const Duration(seconds: 20),
-      onTimeout: () {
-        throw 'Tempo esgotado ao enviar imagem.';
-      },
+    final ref = storage.ref().child(arquivoPath);
+
+    await ref.putData(
+      bytes,
+      SettableMetadata(contentType: 'image/jpeg'),
     );
 
-    final url = supabase.storage.from('documentos').getPublicUrl(nomeArquivo);
+    final url = await ref.getDownloadURL();
 
     if (url.isEmpty) {
-      throw 'Não foi possível gerar URL da imagem.';
+      throw Exception('Não foi possível gerar URL da imagem.');
     }
 
-    return url;
+    return {
+      'url': url,
+      'path': arquivoPath,
+    };
+  }
+
+  Future<void> deletarArquivoStorage(String? arquivoPath) async {
+    if (arquivoPath == null || arquivoPath.isEmpty) return;
+
+    try {
+      await storage.ref().child(arquivoPath).delete();
+    } catch (_) {}
   }
 
   void abrirImagem(String url) {
@@ -173,7 +196,9 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     );
   }
 
-  Future<void> abrirFormularioDocumento({Map<String, dynamic>? documento}) async {
+  Future<void> abrirFormularioDocumento({
+    Map<String, dynamic>? documento,
+  }) async {
     final editando = documento != null;
 
     final tituloController =
@@ -181,7 +206,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     final categoriaController =
         TextEditingController(text: documento?['categoria'] ?? '');
 
-    final dataTexto = documento?['data_validade'];
+    final dataTexto = documento?['dataValidade'];
     DateTime? dataValidade =
         dataTexto != null ? DateTime.tryParse(dataTexto.toString()) : null;
 
@@ -215,32 +240,45 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               });
 
               try {
-                String? arquivoUrl = documento?['arquivo_url'];
+                String? arquivoUrl = documento?['arquivoUrl'];
+                String? arquivoPath = documento?['arquivoPath'];
 
                 if (imagemSelecionada != null) {
-                  arquivoUrl = await uploadDocumentoImagem(imagemSelecionada!);
+                  if (editando && arquivoPath != null && arquivoPath.isNotEmpty) {
+                    await deletarArquivoStorage(arquivoPath);
+                  }
+
+                  final upload = await uploadDocumentoImagem(imagemSelecionada!);
+                  arquivoUrl = upload['url'];
+                  arquivoPath = upload['path'];
                 }
 
                 final status = calcularStatus(dataValidade!);
 
                 if (editando) {
-                  await supabase.from('documentos').update({
+                  await db.collection('documentos').doc(documento['id']).update({
                     'titulo': tituloController.text.trim(),
                     'categoria': categoriaController.text.trim(),
-                    'data_validade':
+                    'dataValidade':
                         dataValidade!.toIso8601String().split('T').first,
                     'status': status,
-                    'arquivo_url': arquivoUrl,
-                  }).eq('id', documento['id']);
+                    'arquivoUrl': arquivoUrl,
+                    'arquivoPath': arquivoPath,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
                 } else {
-                  await supabase.from('documentos').insert({
-                    'equipamento_id': widget.equipamentoId,
+                  await db.collection('documentos').add({
+                    'usuarioId': null,
+                    'equipamentoId': widget.equipamentoId,
+                    'tipo': 'equipamento',
                     'titulo': tituloController.text.trim(),
                     'categoria': categoriaController.text.trim(),
-                    'data_validade':
+                    'dataValidade':
                         dataValidade!.toIso8601String().split('T').first,
                     'status': status,
-                    'arquivo_url': arquivoUrl,
+                    'arquivoUrl': arquivoUrl,
+                    'arquivoPath': arquivoPath,
+                    'createdAt': FieldValue.serverTimestamp(),
                   });
                 }
 
@@ -363,12 +401,11 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                                   fit: BoxFit.cover,
                                 ),
                               )
-                            else if (editando &&
-                                documento['arquivo_url'] != null)
+                            else if (editando && documento['arquivoUrl'] != null)
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
                                 child: Image.network(
-                                  documento['arquivo_url'].toString(),
+                                  documento['arquivoUrl'].toString(),
                                   height: 160,
                                   width: double.infinity,
                                   fit: BoxFit.cover,
@@ -430,19 +467,6 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     );
   }
 
-  String? extrairPathStorage(String? arquivoUrl) {
-    if (arquivoUrl == null || arquivoUrl.isEmpty) return null;
-
-    final uri = Uri.parse(arquivoUrl);
-    final index = uri.pathSegments.indexOf('documentos');
-
-    if (index == -1 || index + 1 >= uri.pathSegments.length) {
-      return null;
-    }
-
-    return uri.pathSegments.sublist(index + 1).join('/');
-  }
-
   Future<void> excluirDocumento(Map<String, dynamic> documento) async {
     showDialog(
       context: context,
@@ -459,17 +483,12 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               Navigator.pop(context);
 
               try {
-                final pathStorage =
-                    extrairPathStorage(documento['arquivo_url']?.toString());
+                await deletarArquivoStorage(documento['arquivoPath']?.toString());
 
-                if (pathStorage != null) {
-                  await supabase.storage.from('documentos').remove([pathStorage]);
-                }
-
-                await supabase
-                    .from('documentos')
-                    .delete()
-                    .eq('id', documento['id']);
+                await db
+                    .collection('documentos')
+                    .doc(documento['id'])
+                    .delete();
 
                 await carregarDados();
 
@@ -632,11 +651,11 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     final status = documento['status'] ?? 'Regular';
     final cor = corStatus(status);
 
-    final validadeTexto = documento['data_validade'];
+    final validadeTexto = documento['dataValidade'];
     final validade =
         validadeTexto != null ? DateTime.tryParse(validadeTexto.toString()) : null;
 
-    final arquivoUrl = documento['arquivo_url']?.toString();
+    final arquivoUrl = documento['arquivoUrl']?.toString();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -716,7 +735,8 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
           Column(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: cor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
