@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -21,10 +22,12 @@ class EquipamentoDetalhesScreen extends StatefulWidget {
 
 class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
   final db = FirebaseFirestore.instance;
-  final storage = FirebaseStorage.instance;
+  final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
   bool carregando = true;
+  bool isAdmin = false;
+
   Map<String, dynamic>? equipamento;
   List<Map<String, dynamic>> documentos = [];
 
@@ -34,8 +37,24 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     carregarDados();
   }
 
+  Future<bool> verificarAdminNoFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return false;
+
+    final profileDoc = await db.collection('users').doc(user.uid).get();
+
+    if (!profileDoc.exists) return false;
+
+    final profile = profileDoc.data();
+
+    return profile?['perfil'] == 'Administrador';
+  }
+
   Future<void> carregarDados() async {
     try {
+      final adminFirestore = await verificarAdminNoFirestore();
+
       final equipamentoDoc =
           await db.collection('equipamentos').doc(widget.equipamentoId).get();
 
@@ -68,6 +87,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
       });
 
       setState(() {
+        isAdmin = adminFirestore;
         equipamento = {
           'id': equipamentoDoc.id,
           ...equipamentoDoc.data()!,
@@ -160,14 +180,16 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     final arquivoPath =
         'equipamentos/${widget.equipamentoId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    final ref = storage.ref().child(arquivoPath);
+    await supabase.storage.from('documentos').uploadBinary(
+          arquivoPath,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        );
 
-    await ref.putData(
-      bytes,
-      SettableMetadata(contentType: 'image/jpeg'),
-    );
-
-    final url = await ref.getDownloadURL();
+    final url = supabase.storage.from('documentos').getPublicUrl(arquivoPath);
 
     if (url.isEmpty) {
       throw Exception('Não foi possível gerar URL da imagem.');
@@ -183,7 +205,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     if (arquivoPath == null || arquivoPath.isEmpty) return;
 
     try {
-      await storage.ref().child(arquivoPath).delete();
+      await supabase.storage.from('documentos').remove([arquivoPath]);
     } catch (_) {}
   }
 
@@ -199,6 +221,13 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
   Future<void> abrirFormularioDocumento({
     Map<String, dynamic>? documento,
   }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     final editando = documento != null;
 
     final tituloController =
@@ -240,11 +269,19 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               });
 
               try {
+                final adminSalvar = await verificarAdminNoFirestore();
+
+                if (!adminSalvar) {
+                  throw Exception('Acesso somente leitura para operadores.');
+                }
+
                 String? arquivoUrl = documento?['arquivoUrl'];
                 String? arquivoPath = documento?['arquivoPath'];
 
                 if (imagemSelecionada != null) {
-                  if (editando && arquivoPath != null && arquivoPath.isNotEmpty) {
+                  if (editando &&
+                      arquivoPath != null &&
+                      arquivoPath.isNotEmpty) {
                     await deletarArquivoStorage(arquivoPath);
                   }
 
@@ -401,7 +438,8 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                                   fit: BoxFit.cover,
                                 ),
                               )
-                            else if (editando && documento['arquivoUrl'] != null)
+                            else if (editando &&
+                                documento['arquivoUrl'] != null)
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
                                 child: Image.network(
@@ -468,6 +506,13 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
   }
 
   Future<void> excluirDocumento(Map<String, dynamic> documento) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -483,12 +528,17 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               Navigator.pop(context);
 
               try {
-                await deletarArquivoStorage(documento['arquivoPath']?.toString());
+                final adminExcluir = await verificarAdminNoFirestore();
 
-                await db
-                    .collection('documentos')
-                    .doc(documento['id'])
-                    .delete();
+                if (!adminExcluir) {
+                  throw Exception('Acesso somente leitura para operadores.');
+                }
+
+                await deletarArquivoStorage(
+                  documento['arquivoPath']?.toString(),
+                );
+
+                await db.collection('documentos').doc(documento['id']).delete();
 
                 await carregarDados();
 
@@ -652,8 +702,9 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
     final cor = corStatus(status);
 
     final validadeTexto = documento['dataValidade'];
-    final validade =
-        validadeTexto != null ? DateTime.tryParse(validadeTexto.toString()) : null;
+    final validade = validadeTexto != null
+        ? DateTime.tryParse(validadeTexto.toString())
+        : null;
 
     final arquivoUrl = documento['arquivoUrl']?.toString();
 
@@ -770,14 +821,16 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                       value: 'abrir',
                       child: Text('Abrir imagem'),
                     ),
-                  const PopupMenuItem(
-                    value: 'editar',
-                    child: Text('Editar'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'excluir',
-                    child: Text('Excluir'),
-                  ),
+                  if (isAdmin)
+                    const PopupMenuItem(
+                      value: 'editar',
+                      child: Text('Editar'),
+                    ),
+                  if (isAdmin)
+                    const PopupMenuItem(
+                      value: 'excluir',
+                      child: Text('Excluir'),
+                    ),
                 ],
               ),
             ],
@@ -832,12 +885,14 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         backgroundColor: const Color(0xFF0D1B2A),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFFE87722),
-        foregroundColor: Colors.white,
-        onPressed: () => abrirFormularioDocumento(),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isAdmin
+          ? FloatingActionButton(
+              backgroundColor: const Color(0xFFE87722),
+              foregroundColor: Colors.white,
+              onPressed: () => abrirFormularioDocumento(),
+              child: const Icon(Icons.add),
+            )
+          : null,
       body: carregando
           ? const Center(child: CircularProgressIndicator())
           : ListView(

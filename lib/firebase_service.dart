@@ -1,21 +1,18 @@
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class FirebaseService {
   FirebaseService._();
 
-  static final auth = FirebaseAuth.instance;
-
+  static final auth = firebase_auth.FirebaseAuth.instance;
   static final db = FirebaseFirestore.instance;
+  static final supabase = Supabase.instance.client;
 
-  static final storage = FirebaseStorage.instance;
-
-  static User? get currentUser => auth.currentUser;
-
+  static firebase_auth.User? get currentUser => auth.currentUser;
   static String? get currentUid => auth.currentUser?.uid;
 
   static String emailPorMatricula(String matricula) {
@@ -24,28 +21,20 @@ class FirebaseService {
 
   static String calcularStatus(DateTime validade) {
     final hoje = DateTime.now();
-
-    final hojeSemHora =
-        DateTime(hoje.year, hoje.month, hoje.day);
-
+    final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
     final validadeSemHora =
         DateTime(validade.year, validade.month, validade.day);
 
-    final dias =
-        validadeSemHora.difference(hojeSemHora).inDays;
+    final dias = validadeSemHora.difference(hojeSemHora).inDays;
 
     if (dias < 0) return 'Vencido';
-
     if (dias <= 30) return 'A vencer';
-
     return 'Regular';
   }
 
   static String formatarData(DateTime data) {
     final dia = data.day.toString().padLeft(2, '0');
-
     final mes = data.month.toString().padLeft(2, '0');
-
     final ano = data.year.toString();
 
     return '$dia/$mes/$ano';
@@ -66,8 +55,7 @@ class FirebaseService {
 
     if (uid == null) return null;
 
-    final doc =
-        await db.collection('users').doc(uid).get();
+    final doc = await db.collection('users').doc(uid).get();
 
     if (!doc.exists) return null;
 
@@ -77,7 +65,7 @@ class FirebaseService {
     };
   }
 
-  static Future<String> uploadImagem({
+  static Future<Map<String, String>> uploadImagem({
     required XFile imagem,
     required String pasta,
   }) async {
@@ -87,32 +75,31 @@ class FirebaseService {
       throw Exception('Usuário não autenticado.');
     }
 
-    final Uint8List bytes =
-        await imagem.readAsBytes();
+    final Uint8List bytes = await imagem.readAsBytes();
 
     final caminho =
-        '$pasta/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        '$pasta/$uid/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    final ref = storage.ref().child(caminho);
+    await supabase.storage.from('documentos').uploadBinary(
+          caminho,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        );
 
-    await ref.putData(
-      bytes,
-      SettableMetadata(
-        contentType: 'image/jpeg',
-      ),
-    );
+    final url = supabase.storage.from('documentos').getPublicUrl(caminho);
 
-    return await ref.getDownloadURL();
+    return {
+      'url': url,
+      'path': caminho,
+    };
   }
 
-  static Future<void> deletarArquivoPorPath(
-    String? arquivoPath,
-  ) async {
-    if (arquivoPath == null ||
-        arquivoPath.isEmpty) {
-      return;
-    }
+  static Future<void> deletarArquivoPorPath(String? arquivoPath) async {
+    if (arquivoPath == null || arquivoPath.isEmpty) return;
 
-    await storage.ref().child(arquivoPath).delete();
+    await supabase.storage.from('documentos').remove([arquivoPath]);
   }
 }

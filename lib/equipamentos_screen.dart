@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'equipamento_detalhes_screen.dart';
@@ -14,19 +15,38 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
   final db = FirebaseFirestore.instance;
 
   bool carregando = true;
+  bool isAdmin = false;
+
   List<Map<String, dynamic>> equipamentos = [];
 
   @override
   void initState() {
     super.initState();
-    carregarEquipamentos();
+    carregarTela();
   }
 
-  Future<void> carregarEquipamentos() async {
+  Future<bool> verificarAdminNoFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return false;
+
+    final profileDoc = await db.collection('users').doc(user.uid).get();
+
+    if (!profileDoc.exists) return false;
+
+    final profile = profileDoc.data();
+
+    return profile?['perfil'] == 'Administrador';
+  }
+
+  Future<void> carregarTela() async {
     try {
+      final adminFirestore = await verificarAdminNoFirestore();
+
       final snapshot = await db.collection('equipamentos').orderBy('nome').get();
 
       setState(() {
+        isAdmin = adminFirestore;
         equipamentos = snapshot.docs.map((doc) {
           return {
             'id': doc.id,
@@ -43,6 +63,10 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
 
       mostrarErro('Erro ao carregar equipamentos: $e');
     }
+  }
+
+  Future<void> carregarEquipamentos() async {
+    await carregarTela();
   }
 
   void mostrarErro(String mensagem) {
@@ -76,6 +100,13 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
   }
 
   Future<void> abrirFormulario({Map<String, dynamic>? equipamento}) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     final editando = equipamento != null;
 
     final nomeController =
@@ -140,10 +171,13 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: statusSelecionado,
+                      initialValue: statusSelecionado,
                       decoration: inputDecoration('Status'),
                       items: const [
-                        DropdownMenuItem(value: 'Ativo', child: Text('Ativo')),
+                        DropdownMenuItem(
+                          value: 'Ativo',
+                          child: Text('Ativo'),
+                        ),
                         DropdownMenuItem(
                           value: 'Manutenção',
                           child: Text('Manutenção'),
@@ -170,6 +204,15 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                         }
 
                         try {
+                          final adminSalvar =
+                              await verificarAdminNoFirestore();
+
+                          if (!adminSalvar) {
+                            throw Exception(
+                              'Acesso somente leitura para operadores.',
+                            );
+                          }
+
                           if (editando) {
                             await db
                                 .collection('equipamentos')
@@ -236,6 +279,13 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
   }
 
   Future<void> excluirEquipamento(Map<String, dynamic> equipamento) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -251,6 +301,14 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
               Navigator.pop(context);
 
               try {
+                final adminExcluir = await verificarAdminNoFirestore();
+
+                if (!adminExcluir) {
+                  throw Exception(
+                    'Acesso somente leitura para operadores.',
+                  );
+                }
+
                 final docs = await db
                     .collection('documentos')
                     .where('equipamentoId', isEqualTo: equipamento['id'])
@@ -373,27 +431,28 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                     ),
                   ),
                 ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'editar') {
-                      abrirFormulario(equipamento: equipamento);
-                    }
+                if (isAdmin)
+                  PopupMenuButton<String>(
+                    onSelected: (value) {
+                      if (value == 'editar') {
+                        abrirFormulario(equipamento: equipamento);
+                      }
 
-                    if (value == 'excluir') {
-                      excluirEquipamento(equipamento);
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'editar',
-                      child: Text('Editar'),
-                    ),
-                    PopupMenuItem(
-                      value: 'excluir',
-                      child: Text('Excluir'),
-                    ),
-                  ],
-                ),
+                      if (value == 'excluir') {
+                        excluirEquipamento(equipamento);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'editar',
+                        child: Text('Editar'),
+                      ),
+                      PopupMenuItem(
+                        value: 'excluir',
+                        child: Text('Excluir'),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ],
@@ -456,12 +515,14 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         backgroundColor: const Color(0xFF0D1B2A),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFFE87722),
-        foregroundColor: Colors.white,
-        onPressed: () => abrirFormulario(),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isAdmin
+          ? FloatingActionButton(
+              backgroundColor: const Color(0xFFE87722),
+              foregroundColor: Colors.white,
+              onPressed: () => abrirFormulario(),
+              child: const Icon(Icons.add),
+            )
+          : null,
       body: carregando
           ? const Center(child: CircularProgressIndicator())
           : Column(

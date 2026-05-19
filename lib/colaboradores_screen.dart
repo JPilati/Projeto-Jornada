@@ -18,19 +18,37 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
 
   List<Map<String, dynamic>> colaboradores = [];
   bool carregando = true;
+  bool isAdmin = false;
 
   @override
   void initState() {
     super.initState();
-    carregarColaboradores();
+    carregarTela();
   }
 
-  Future<void> carregarColaboradores() async {
+  Future<bool> verificarAdminNoFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return false;
+
+    final profileDoc = await db.collection('users').doc(user.uid).get();
+
+    if (!profileDoc.exists) return false;
+
+    final profile = profileDoc.data();
+
+    return profile?['perfil'] == 'Administrador';
+  }
+
+  Future<void> carregarTela() async {
     try {
-      final snapshot =
-          await db.collection('users').orderBy('nome').get();
+      final adminFirestore = await verificarAdminNoFirestore();
+
+      final snapshot = await db.collection('users').orderBy('nome').get();
 
       setState(() {
+        isAdmin = adminFirestore;
+
         colaboradores = snapshot.docs.map((doc) {
           return {
             'id': doc.id,
@@ -47,6 +65,10 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
 
       mostrarErro('Erro ao carregar colaboradores: $e');
     }
+  }
+
+  Future<void> carregarColaboradores() async {
+    await carregarTela();
   }
 
   void mostrarErro(String mensagem) {
@@ -67,7 +89,16 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     );
   }
 
-  void _abrirFormularioCadastro({Map<String, dynamic>? usuarioEditando}) {
+  Future<void> _abrirFormularioCadastro({
+    Map<String, dynamic>? usuarioEditando,
+  }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     final nomeController =
         TextEditingController(text: usuarioEditando?['nome'] ?? '');
     final matriculaController =
@@ -111,13 +142,11 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-
                     TextField(
                       controller: nomeController,
                       decoration: _inputDecoration('Nome completo'),
                     ),
                     const SizedBox(height: 12),
-
                     TextField(
                       controller: matriculaController,
                       enabled: !editando,
@@ -125,24 +154,20 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                       decoration: _inputDecoration('Matrícula / CPF'),
                     ),
                     const SizedBox(height: 12),
-
                     TextField(
                       controller: cargoController,
                       decoration: _inputDecoration('Cargo / Função'),
                     ),
                     const SizedBox(height: 12),
-
                     if (!editando)
                       TextField(
                         controller: senhaController,
                         obscureText: true,
                         decoration: _inputDecoration('Senha provisória'),
                       ),
-
                     if (!editando) const SizedBox(height: 12),
-
                     DropdownButtonFormField<String>(
-                      value: perfilSelecionado,
+                      initialValue: perfilSelecionado,
                       decoration: _inputDecoration('Tipo de acesso'),
                       items: const [
                         DropdownMenuItem(
@@ -161,9 +186,8 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                       },
                     ),
                     const SizedBox(height: 12),
-
                     DropdownButtonFormField<String>(
-                      value: statusSelecionado,
+                      initialValue: statusSelecionado,
                       decoration: _inputDecoration('Status'),
                       items: const [
                         DropdownMenuItem(
@@ -182,7 +206,6 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                       },
                     ),
                     const SizedBox(height: 22),
-
                     ElevatedButton(
                       onPressed: () async {
                         if (nomeController.text.trim().isEmpty ||
@@ -254,6 +277,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     required String perfil,
     required String status,
   }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     FirebaseApp? secondaryApp;
 
     try {
@@ -311,6 +341,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     required String perfil,
     required String status,
   }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     try {
       await db.collection('users').doc(id).update({
         'nome': nome,
@@ -332,6 +369,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
   }
 
   Future<void> _alternarStatus(Map<String, dynamic> usuario) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     final novoStatus = usuario['status'] == 'Ativo' ? 'Inativo' : 'Ativo';
 
     try {
@@ -346,6 +390,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
   }
 
   Future<void> _excluirUsuario(Map<String, dynamic> usuario) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -436,7 +487,6 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
             ),
           ),
           const SizedBox(width: 14),
-
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -480,7 +530,6 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               ],
             ),
           ),
-
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -521,37 +570,38 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                   ),
                 ),
               ),
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'editar') {
-                    _abrirFormularioCadastro(usuarioEditando: usuario);
-                  }
+              if (isAdmin)
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'editar') {
+                      _abrirFormularioCadastro(usuarioEditando: usuario);
+                    }
 
-                  if (value == 'status') {
-                    _alternarStatus(usuario);
-                  }
+                    if (value == 'status') {
+                      _alternarStatus(usuario);
+                    }
 
-                  if (value == 'excluir') {
-                    _excluirUsuario(usuario);
-                  }
-                },
-                itemBuilder: (_) => [
-                  const PopupMenuItem(
-                    value: 'editar',
-                    child: Text('Editar'),
-                  ),
-                  PopupMenuItem(
-                    value: 'status',
-                    child: Text(
-                      status == 'Ativo' ? 'Desativar' : 'Ativar',
+                    if (value == 'excluir') {
+                      _excluirUsuario(usuario);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'editar',
+                      child: Text('Editar'),
                     ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'excluir',
-                    child: Text('Excluir da lista'),
-                  ),
-                ],
-              ),
+                    PopupMenuItem(
+                      value: 'status',
+                      child: Text(
+                        status == 'Ativo' ? 'Desativar' : 'Ativar',
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'excluir',
+                      child: Text('Excluir da lista'),
+                    ),
+                  ],
+                ),
             ],
           ),
         ],
@@ -613,12 +663,14 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
         backgroundColor: const Color(0xFF0D1B2A),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _abrirFormularioCadastro(),
-        backgroundColor: const Color(0xFFE87722),
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isAdmin
+          ? FloatingActionButton(
+              onPressed: () => _abrirFormularioCadastro(),
+              backgroundColor: const Color(0xFFE87722),
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.add),
+            )
+          : null,
       body: Column(
         children: [
           Container(

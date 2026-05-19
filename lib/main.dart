@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart' hide FirebaseService;
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'firebase_options.dart';
 import 'firebase_service.dart';
@@ -15,6 +16,11 @@ void main() async {
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  await Supabase.initialize(
+    url: 'https://mxecasxsghuimdirtnhc.supabase.co',
+    anonKey: 'sb_publishable_xQioOh6azAYq_KchXTs5Bw_P6FyfQqZ',
   );
 
   runApp(const HubDigitalApp());
@@ -155,123 +161,222 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0D1B2A),
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 220,
-                    height: 220,
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Gestão de documentos operacionais',
-                    style: TextStyle(
-                      color: Color(0xFF8A9BB0),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Matrícula / CPF',
-                    style: TextStyle(
-                      color: Color(0xFF4A5568),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: matriculaController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.badge_outlined),
-                      hintText: 'Digite sua matrícula',
-                      filled: true,
-                      fillColor: const Color(0xFFF7F9FC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+            Column(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF071A2E),
+                          Color(0xFF0D1B2A),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Senha',
-                    style: TextStyle(
-                      color: Color(0xFF4A5568),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: senhaController,
-                    obscureText: ocultarSenha,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.lock_outline_rounded),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          ocultarSenha
-                              ? Icons.visibility_off
-                              : Icons.visibility,
+                    child: Center(
+                      child: SizedBox(
+                        width: 150,
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          fit: BoxFit.contain,
                         ),
-                        onPressed: () {
-                          setState(() {
-                            ocultarSenha = !ocultarSenha;
-                          });
-                        },
-                      ),
-                      hintText: 'Digite sua senha',
-                      filled: true,
-                      fillColor: const Color(0xFFF7F9FC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: carregando ? null : realizarLogin,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1976D2),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                const Expanded(
+                  flex: 6,
+                  child: SizedBox(),
+                ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: FractionallySizedBox(
+                heightFactor: 0.64,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(28, 38, 28, 24),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(64),
                     ),
-                    child: carregando
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Center(
+                          child: Text(
+                            'Login',
+                            style: TextStyle(
+                              color: Color(0xFF0D1B2A),
+                              fontSize: 38,
+                              fontWeight: FontWeight.bold,
                             ),
-                          )
-                        : const Text(
-                            'ENTRAR NO SISTEMA',
-                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Center(
+                          child: Text(
+                            'Acesse sua conta para continuar',
+                            style: TextStyle(
+                              color: Color(0xFF718096),
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 34),
+                        const Text(
+                          'Matrícula',
+                          style: TextStyle(
+                            color: Color(0xFF0D1B2A),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: matriculaController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(
+                            color: Color(0xFF0D1B2A),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Digite sua matrícula',
+                            hintStyle: const TextStyle(
+                              color: Color(0xFF9AA6B2),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.badge_outlined,
+                              color: Color(0xFF1976D2),
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 20,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade200,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF1976D2),
+                                width: 1.6,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                        const Text(
+                          'Senha',
+                          style: TextStyle(
+                            color: Color(0xFF0D1B2A),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: senhaController,
+                          obscureText: ocultarSenha,
+                          style: const TextStyle(
+                            color: Color(0xFF0D1B2A),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Digite sua senha',
+                            hintStyle: const TextStyle(
+                              color: Color(0xFF9AA6B2),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.lock_outline_rounded,
+                              color: Color(0xFF1976D2),
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                ocultarSenha
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                                color: const Color(0xFF718096),
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  ocultarSenha = !ocultarSenha;
+                                });
+                              },
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 20,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade200,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF1976D2),
+                                width: 1.6,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 58,
+                          child: ElevatedButton(
+                            onPressed: carregando ? null : realizarLogin,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF11468F),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                            child: carregando
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.4,
+                                    ),
+                                  )
+                                : const Text(
+                                    'Entrar',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           ],

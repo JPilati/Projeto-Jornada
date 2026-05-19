@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -15,7 +15,7 @@ class DocumentosScreen extends StatefulWidget {
 
 class _DocumentosScreenState extends State<DocumentosScreen> {
   final db = FirebaseFirestore.instance;
-  final storage = FirebaseStorage.instance;
+  final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
   bool carregando = true;
@@ -35,6 +35,20 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     carregarDadosIniciais();
   }
 
+  Future<bool> verificarAdminNoFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return false;
+
+    final profileDoc = await db.collection('users').doc(user.uid).get();
+
+    if (!profileDoc.exists) return false;
+
+    final profile = profileDoc.data();
+
+    return profile?['perfil'] == 'Administrador';
+  }
+
   Future<void> carregarDadosIniciais() async {
     final user = FirebaseAuth.instance.currentUser;
 
@@ -46,15 +60,9 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     }
 
     try {
-      final profileDoc = await db.collection('users').doc(user.uid).get();
+      final adminFirestore = await verificarAdminNoFirestore();
 
-      if (!profileDoc.exists) {
-        throw Exception('Perfil do usuário não encontrado.');
-      }
-
-      final profile = profileDoc.data()!;
-
-      isAdmin = profile['perfil'] == 'Administrador';
+      isAdmin = adminFirestore;
 
       if (isAdmin) {
         await carregarUsuariosParaAdmin();
@@ -242,7 +250,8 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
   }
 
   Future<Map<String, String>> uploadDocumentoImagem(XFile imagem) async {
-    final usuarioId = usuarioSelecionadoId ?? FirebaseAuth.instance.currentUser?.uid;
+    final usuarioId =
+        usuarioSelecionadoId ?? FirebaseAuth.instance.currentUser?.uid;
 
     if (usuarioId == null) {
       throw Exception('Usuário não encontrado para upload.');
@@ -251,16 +260,18 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     final bytes = await imagem.readAsBytes();
 
     final arquivoPath =
-        'documentos/$usuarioId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        '$usuarioId/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    final ref = storage.ref().child(arquivoPath);
+    await supabase.storage.from('documentos').uploadBinary(
+          arquivoPath,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        );
 
-    await ref.putData(
-      bytes,
-      SettableMetadata(contentType: 'image/jpeg'),
-    );
-
-    final url = await ref.getDownloadURL();
+    final url = supabase.storage.from('documentos').getPublicUrl(arquivoPath);
 
     if (url.isEmpty) {
       throw Exception('Não foi possível gerar URL da imagem.');
@@ -284,6 +295,13 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
   Future<void> abrirFormularioDocumento({
     Map<String, dynamic>? documento,
   }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     final editando = documento != null;
 
     final tituloController =
@@ -329,7 +347,9 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                 String? arquivoPath = documento?['arquivoPath'];
 
                 if (imagemSelecionada != null) {
-                  if (editando && arquivoPath != null && arquivoPath.isNotEmpty) {
+                  if (editando &&
+                      arquivoPath != null &&
+                      arquivoPath.isNotEmpty) {
                     await deletarArquivoStorage(arquivoPath);
                   }
 
@@ -543,13 +563,13 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     required String? arquivoUrl,
     required String? arquivoPath,
   }) async {
-    final user = FirebaseAuth.instance.currentUser;
+    final adminFirestore = await verificarAdminNoFirestore();
 
-    if (user == null) {
-      throw Exception('Usuário não autenticado.');
+    if (!adminFirestore) {
+      throw Exception('Acesso somente leitura para operadores.');
     }
 
-    final usuarioId = isAdmin ? usuarioSelecionadoId : user.uid;
+    final usuarioId = usuarioSelecionadoId;
 
     if (usuarioId == null) {
       throw Exception('Usuário selecionado não encontrado.');
@@ -571,10 +591,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     });
 
     await carregarDocumentos(usuarioId);
-
-    if (isAdmin) {
-      await carregarUsuariosParaAdmin();
-    }
+    await carregarUsuariosParaAdmin();
 
     mostrarSucesso('Documento lançado com sucesso.');
   }
@@ -587,6 +604,12 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     required String? arquivoUrl,
     required String? arquivoPath,
   }) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      throw Exception('Acesso somente leitura para operadores.');
+    }
+
     final status = calcularStatus(validade);
 
     await db.collection('documentos').doc(id).update({
@@ -603,9 +626,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
       await carregarDocumentos(usuarioSelecionadoId!);
     }
 
-    if (isAdmin) {
-      await carregarUsuariosParaAdmin();
-    }
+    await carregarUsuariosParaAdmin();
 
     mostrarSucesso('Documento atualizado com sucesso.');
   }
@@ -614,11 +635,18 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     if (arquivoPath == null || arquivoPath.isEmpty) return;
 
     try {
-      await storage.ref().child(arquivoPath).delete();
+      await supabase.storage.from('documentos').remove([arquivoPath]);
     } catch (_) {}
   }
 
   Future<void> excluirDocumento(Map<String, dynamic> documento) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -634,20 +662,17 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
               Navigator.pop(context);
 
               try {
-                await deletarArquivoStorage(documento['arquivoPath']?.toString());
+                await deletarArquivoStorage(
+                  documento['arquivoPath']?.toString(),
+                );
 
-                await db
-                    .collection('documentos')
-                    .doc(documento['id'])
-                    .delete();
+                await db.collection('documentos').doc(documento['id']).delete();
 
                 if (usuarioSelecionadoId != null) {
                   await carregarDocumentos(usuarioSelecionadoId!);
                 }
 
-                if (isAdmin) {
-                  await carregarUsuariosParaAdmin();
-                }
+                await carregarUsuariosParaAdmin();
 
                 mostrarSucesso('Documento excluído completamente.');
               } catch (e) {
@@ -992,14 +1017,16 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                       value: 'abrir',
                       child: Text('Abrir imagem'),
                     ),
-                  const PopupMenuItem(
-                    value: 'editar',
-                    child: Text('Editar'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'excluir',
-                    child: Text('Excluir'),
-                  ),
+                  if (isAdmin)
+                    const PopupMenuItem(
+                      value: 'editar',
+                      child: Text('Editar'),
+                    ),
+                  if (isAdmin)
+                    const PopupMenuItem(
+                      value: 'excluir',
+                      child: Text('Excluir'),
+                    ),
                 ],
               ),
             ],
@@ -1119,14 +1146,14 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
               )
             : null,
       ),
-      floatingActionButton: adminNaListaUsuarios
-          ? null
-          : FloatingActionButton(
+      floatingActionButton: isAdmin && !adminNaListaUsuarios
+          ? FloatingActionButton(
               onPressed: () => abrirFormularioDocumento(),
               backgroundColor: const Color(0xFFE87722),
               foregroundColor: Colors.white,
               child: const Icon(Icons.camera_alt_rounded),
-            ),
+            )
+          : null,
       body: carregando
           ? const Center(child: CircularProgressIndicator())
           : adminNaListaUsuarios
