@@ -16,7 +16,7 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
 
   bool carregando = true;
   bool isAdmin = false;
-
+  String? filtroSelecionado;
   List<Map<String, dynamic>> equipamentos = [];
 
   @override
@@ -462,32 +462,42 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
   }
 
   Widget _resumoCard(String valor, String label, Color cor) {
+    final selecionado = filtroSelecionado == label;
+
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            Text(
-              valor,
-              style: TextStyle(
-                color: cor,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          setState(() {
+            filtroSelecionado = selecionado ? null : label;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: selecionado ? cor : cor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: [
+              Text(
+                valor,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            Text(
-              label,
-              style: TextStyle(
-                color: cor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              Text(
+                label,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -501,6 +511,11 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         equipamentos.where((item) => item['status'] == 'Manutenção').length;
     final inativos =
         equipamentos.where((item) => item['status'] == 'Inativo').length;
+    final equipamentosFiltrados = filtroSelecionado == null
+        ? equipamentos
+        : equipamentos
+            .where((item) => item['status'] == filtroSelecionado)
+            .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7FB),
@@ -558,13 +573,14 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                   ),
                 ),
                 Expanded(
-                  child: equipamentos.isEmpty
+                  child: equipamentosFiltrados.isEmpty
                       ? const Center(
-                          child: Text('Nenhum veículo cadastrado.'),
+                          child: Text('Nenhum veículo encontrado.'),
                         )
                       : ListView(
                           padding: const EdgeInsets.all(18),
-                          children: equipamentos.map(equipamentoCard).toList(),
+                          children:
+                              equipamentosFiltrados.map(equipamentoCard).toList(),
                         ),
                 ),
               ],

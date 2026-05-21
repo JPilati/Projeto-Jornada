@@ -28,6 +28,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
 
   String? usuarioSelecionadoId;
   String? usuarioSelecionadoNome;
+  String? filtroStatusSelecionado;
 
   @override
   void initState() {
@@ -687,32 +688,46 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
   }
 
   Widget resumoCard(String titulo, int quantidade, Color cor) {
+    final selecionado = filtroStatusSelecionado == titulo;
+
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            Text(
-              quantidade.toString(),
-              style: TextStyle(
-                color: cor,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          setState(() {
+            filtroStatusSelecionado = selecionado ? null : titulo;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: selecionado ? cor : cor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selecionado ? Colors.white : Colors.transparent,
+              width: 1.5,
             ),
-            Text(
-              titulo,
-              style: TextStyle(
-                color: cor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+          ),
+          child: Column(
+            children: [
+              Text(
+                quantidade.toString(),
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-          ],
+              Text(
+                titulo,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1052,6 +1067,11 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
         documentos.where((doc) => doc['status'] == 'A vencer').length;
     final vencidos =
         documentos.where((doc) => doc['status'] == 'Vencido').length;
+    final documentosFiltrados = filtroStatusSelecionado == null
+        ? documentos
+        : documentos
+            .where((doc) => doc['status'] == filtroStatusSelecionado)
+            .toList();
 
     return Column(
       children: [
@@ -1092,7 +1112,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                   ),
                   const SizedBox(width: 10),
                   resumoCard(
-                    'Vencidos',
+                    'Vencido',
                     vencidos,
                     const Color(0xFFE53935),
                   ),
@@ -1102,12 +1122,18 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
           ),
         ),
         Expanded(
-          child: documentos.isEmpty
-              ? const Center(child: Text('Nenhum documento lançado.'))
-              : ListView(
-                  padding: const EdgeInsets.all(18),
-                  children: documentos.map(documentoCard).toList(),
-                ),
+          child: documentosFiltrados.isEmpty
+          ? Center(
+              child: Text(
+                filtroStatusSelecionado == null
+                    ? 'Nenhum documento lançado.'
+                    : 'Nenhum documento $filtroStatusSelecionado encontrado.',
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(18),
+              children: documentosFiltrados.map(documentoCard).toList(),
+            ),
         ),
       ],
     );
@@ -1141,6 +1167,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                     usuarioSelecionadoId = null;
                     usuarioSelecionadoNome = null;
                     documentos = [];
+                    filtroStatusSelecionado = null;
                   });
                 },
               )

@@ -19,6 +19,7 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
   List<Map<String, dynamic>> colaboradores = [];
   bool carregando = true;
   bool isAdmin = false;
+  String? filtroSelecionado;
 
   @override
   void initState() {
@@ -610,32 +611,42 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
   }
 
   Widget _buildResumo(String valor, String titulo, Color cor) {
+    final selecionado = filtroSelecionado == titulo;
+
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            Text(
-              valor,
-              style: TextStyle(
-                color: cor,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          setState(() {
+            filtroSelecionado = selecionado ? null : titulo;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: selecionado ? cor : cor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: [
+              Text(
+                valor,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            Text(
-              titulo,
-              style: TextStyle(
-                color: cor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              Text(
+                titulo,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -649,6 +660,14 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     final admins = colaboradores
         .where((user) => user['perfil'] == 'Administrador')
         .length;
+    final colaboradoresFiltrados = filtroSelecionado == null ||
+          filtroSelecionado == 'Total'
+      ? colaboradores
+      : filtroSelecionado == 'Ativos'
+          ? colaboradores.where((user) => user['status'] == 'Ativo').toList()
+          : colaboradores
+              .where((user) => user['perfil'] == 'Administrador')
+              .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7FB),
@@ -708,14 +727,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                 ? const Center(
                     child: CircularProgressIndicator(),
                   )
-                : colaboradores.isEmpty
+                : colaboradoresFiltrados.isEmpty
                     ? const Center(
-                        child: Text('Nenhum colaborador cadastrado.'),
+                        child: Text('Nenhum colaborador encontrado.'),
                       )
                     : ListView(
                         padding: const EdgeInsets.all(18),
-                        children:
-                            colaboradores.map(_buildColaboradorCard).toList(),
+                        children: colaboradoresFiltrados.map(_buildColaboradorCard).toList(),
                       ),
           ),
         ],
