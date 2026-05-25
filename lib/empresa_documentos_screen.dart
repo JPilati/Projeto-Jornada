@@ -215,7 +215,7 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
           bytes,
           fileOptions: const FileOptions(
             contentType: 'image/jpeg',
-            upsert: true,
+            upsert: false,
           ),
         );
 

@@ -289,7 +289,7 @@ class _DocumentosScreenState
           bytes,
           fileOptions: const FileOptions(
             contentType: 'image/jpeg',
-            upsert: true,
+            upsert: false,
           ),
         );
 

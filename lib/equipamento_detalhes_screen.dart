@@ -30,6 +30,18 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
   Map<String, dynamic>? equipamento;
   List<Map<String, dynamic>> documentos = [];
+  String tipoSelecionado = 'Todos';
+  DateTime? dataInicioFiltro;
+  DateTime? dataFimFiltro;
+  bool mostrarFiltros = false;
+
+  final List<String> tiposDocumentosEquipamento = [
+    'Todos',
+    'ART',
+    'Licença DER',
+    'Licença DNIT',
+    'Tacógrafo',
+  ];
 
   @override
   void initState() {
@@ -185,7 +197,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
           bytes,
           fileOptions: const FileOptions(
             contentType: 'image/jpeg',
-            upsert: true,
+            upsert: false,
           ),
         );
 
@@ -230,10 +242,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
     final editando = documento != null;
 
-    final tituloController =
-        TextEditingController(text: documento?['titulo'] ?? '');
-    final categoriaController =
-        TextEditingController(text: documento?['categoria'] ?? '');
+    String? tipoDocumentoSelecionado = documento?['categoria'];
 
     final dataTexto = documento?['dataValidade'];
     DateTime? dataValidade =
@@ -254,8 +263,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             Future<void> salvar() async {
-              if (tituloController.text.trim().isEmpty ||
-                  categoriaController.text.trim().isEmpty ||
+              if (tipoDocumentoSelecionado == null ||
                   dataValidade == null ||
                   (!editando && imagemSelecionada == null)) {
                 mostrarErro(
@@ -269,12 +277,6 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
               });
 
               try {
-                final adminSalvar = await verificarAdminNoFirestore();
-
-                if (!adminSalvar) {
-                  throw Exception('Acesso somente leitura para operadores.');
-                }
-
                 String? arquivoUrl = documento?['arquivoUrl'];
                 String? arquivoPath = documento?['arquivoPath'];
 
@@ -294,8 +296,8 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
                 if (editando) {
                   await db.collection('documentos').doc(documento['id']).update({
-                    'titulo': tituloController.text.trim(),
-                    'categoria': categoriaController.text.trim(),
+                    'titulo': tipoDocumentoSelecionado,
+                    'categoria': tipoDocumentoSelecionado,
                     'dataValidade':
                         dataValidade!.toIso8601String().split('T').first,
                     'status': status,
@@ -308,8 +310,8 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                     'usuarioId': null,
                     'equipamentoId': widget.equipamentoId,
                     'tipo': 'equipamento',
-                    'titulo': tituloController.text.trim(),
-                    'categoria': categoriaController.text.trim(),
+                    'titulo': tipoDocumentoSelecionado,
+                    'categoria': tipoDocumentoSelecionado,
                     'dataValidade':
                         dataValidade!.toIso8601String().split('T').first,
                     'status': status,
@@ -357,16 +359,28 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    TextField(
-                      controller: tituloController,
-                      decoration: inputDecoration('Nome do documento'),
+
+                    DropdownButtonFormField<String>(
+                      value: tipoDocumentoSelecionado,
+                      hint: const Text('Escolher tipo de documento'),
+                      decoration: inputDecoration('Tipo de documento'),
+                      items: tiposDocumentosEquipamento
+                          .where((tipo) => tipo != 'Todos')
+                          .map((tipo) {
+                        return DropdownMenuItem(
+                          value: tipo,
+                          child: Text(tipo),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setModalState(() {
+                          tipoDocumentoSelecionado = value;
+                        });
+                      },
                     ),
+
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: categoriaController,
-                      decoration: inputDecoration('Categoria'),
-                    ),
-                    const SizedBox(height: 12),
+
                     InkWell(
                       onTap: () async {
                         final data = await showDatePicker(
@@ -404,7 +418,9 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                         ),
                       ),
                     ),
+
                     const SizedBox(height: 12),
+
                     InkWell(
                       onTap: () async {
                         final imagem = await escolherImagem();
@@ -469,7 +485,9 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                         ),
                       ),
                     ),
+
                     const SizedBox(height: 22),
+
                     ElevatedButton(
                       onPressed: salvando ? null : salvar,
                       style: ElevatedButton.styleFrom(
@@ -491,8 +509,9 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                             )
                           : Text(
                               editando ? 'SALVAR ALTERAÇÕES' : 'LANÇAR',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                   ],
