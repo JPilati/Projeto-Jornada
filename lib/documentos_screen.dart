@@ -1,10 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:supabase_flutter/supabase_flutter.dart'; 
+import 'package:flutter/material.dart'; 
 import 'package:image_picker/image_picker.dart';
+import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 
 class DocumentosScreen extends StatefulWidget {
   const DocumentosScreen({super.key});
@@ -13,10 +14,27 @@ class DocumentosScreen extends StatefulWidget {
   State<DocumentosScreen> createState() => _DocumentosScreenState();
 }
 
-class _DocumentosScreenState extends State<DocumentosScreen> {
+class _DocumentosScreenState 
+    extends State<DocumentosScreen> {
   final db = FirebaseFirestore.instance;
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
+  final List<String> tiposDocumentosColaborador = [
+  'Todos',
+  'ASO',
+  'CNH',
+  'Toxicológico',
+  'NR-06',
+  'NR-11',
+  'NR-11/18',
+  'NR-12',
+  'NR-18',
+  'NR-35',
+  'Direção Defensiva',
+  'Integração por Cliente',
+  'Cinto Paraquedista / CA',
+  'Ficha de EPI / OS',
+];
 
   bool carregando = true;
   bool isAdmin = false;
@@ -29,6 +47,11 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
   String? usuarioSelecionadoId;
   String? usuarioSelecionadoNome;
   String? filtroStatusSelecionado;
+  String tipoSelecionado = 'Todos';
+  DateTime? dataInicioFiltro;
+  DateTime? dataFimFiltro;
+  bool mostrarFiltros = false;
+
 
   @override
   void initState() {
@@ -125,26 +148,28 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
       };
     }).toList();
 
-    lista.sort((a, b) {
-      final aResumo = contagem[a['id']] ?? {};
+    lista.sort((a, b) { 
+	    final aResumo = contagem[a['id']] ?? {};
       final bResumo = contagem[b['id']] ?? {};
-
       final aVencido = aResumo['Vencido'] ?? 0;
       final bVencido = bResumo['Vencido'] ?? 0;
-
       final aAVencer = aResumo['A vencer'] ?? 0;
       final bAVencer = bResumo['A vencer'] ?? 0;
 
-      final aRegular = aResumo['Regular'] ?? 0;
-      final bRegular = bResumo['Regular'] ?? 0;
+      if (bVencido != aVencido) {
+        return bVencido - aVencido; 
+      }
 
-      if (bVencido != aVencido) return bVencido - aVencido;
-      if (bAVencer != aAVencer) return bAVencer - aAVencer;
-      if (bRegular != aRegular) return bRegular - aRegular;
+      if (bAVencer != aAVencer) {
+        return bAVencer - aAVencer; 
+      }
 
       return (a['nome'] ?? '')
-          .toString()
-          .compareTo((b['nome'] ?? '').toString());
+        .toString()
+        .toLowerCase()
+        .compareTo(
+          (b['nome'] ?? '').toString().toLowerCase(),
+        );
     });
 
     setState(() {
@@ -168,14 +193,10 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     }).toList();
 
     lista.sort((a, b) {
-      final aCreated = a['createdAt'];
-      final bCreated = b['createdAt'];
-
-      if (aCreated is Timestamp && bCreated is Timestamp) {
-        return bCreated.compareTo(aCreated);
-      }
-
-      return 0;
+      return (a['titulo'] ?? '')
+          .toString()
+          .toLowerCase()
+          .compareTo((b['titulo'] ?? '').toString().toLowerCase());
     });
 
     setState(() {
@@ -305,10 +326,7 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
 
     final editando = documento != null;
 
-    final tituloController =
-        TextEditingController(text: documento?['titulo'] ?? '');
-    final categoriaController =
-        TextEditingController(text: documento?['categoria'] ?? '');
+    String? categoriaSelecionada = documento?['categoria'];
 
     final dataTexto = documento?['dataValidade'];
     DateTime? dataValidade =
@@ -317,6 +335,19 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
     XFile? imagemSelecionada;
     Uint8List? imagemBytes;
     bool salvando = false;
+
+    final dataMask = MaskTextInputFormatter(
+      mask: '##/##/####',
+      filter: {
+        "#": RegExp(r'[0-9]'),
+      },
+    );
+
+    final dataController = TextEditingController(
+      text: dataValidade != null
+          ? formatarData(dataValidade)
+          : '',
+    );
 
     await showModalBottomSheet(
       context: context,
@@ -329,10 +360,9 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             Future<void> salvar() async {
-              if (tituloController.text.trim().isEmpty ||
-                  categoriaController.text.trim().isEmpty ||
-                  dataValidade == null ||
-                  (!editando && imagemSelecionada == null)) {
+              if (categoriaSelecionada == null ||
+                dataValidade == null ||
+                (!editando && imagemSelecionada == null)) {
                 mostrarErro(
                   'Preencha todos os campos e tire a foto do documento.',
                 );
@@ -362,16 +392,16 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                 if (editando) {
                   await editarDocumento(
                     id: documento['id'],
-                    titulo: tituloController.text.trim(),
-                    categoria: categoriaController.text.trim(),
+                    titulo: categoriaSelecionada!,
+                    categoria: categoriaSelecionada!,
                     validade: dataValidade!,
                     arquivoUrl: arquivoUrl,
                     arquivoPath: arquivoPath,
                   );
                 } else {
                   await cadastrarDocumento(
-                    titulo: tituloController.text.trim(),
-                    categoria: categoriaController.text.trim(),
+                    titulo: categoriaSelecionada!,
+                    categoria: categoriaSelecionada!,
                     validade: dataValidade!,
                     arquivoUrl: arquivoUrl,
                     arquivoPath: arquivoPath,
@@ -408,52 +438,47 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    TextField(
-                      controller: tituloController,
-                      decoration: inputDecoration('Nome do documento'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: categoriaController,
-                      decoration: inputDecoration('Categoria'),
-                    ),
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: () async {
-                        final data = await showDatePicker(
-                          context: context,
-                          initialDate: dataValidade ?? DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035),
+                    DropdownButtonFormField<String>(
+                      value: categoriaSelecionada,
+                      hint: const Text('Escolher tipo de documento'),
+                      decoration: inputDecoration('Tipo de documento'),
+                      items: tiposDocumentosColaborador
+                          .where((tipo) => tipo != 'Todos')
+                          .map((tipo) {
+                        return DropdownMenuItem(
+                          value: tipo,
+                          child: Text(tipo),
                         );
+                      }).toList(),
+                      onChanged: (value) {
+                        setModalState(() {
+                          categoriaSelecionada = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: dataController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [dataMask],
+                      decoration: inputDecoration('Validade'),
+                      onChanged: (value) {
+                        if (value.length == 10) {
+                          final partes = value.split('/');
 
-                        if (data != null) {
-                          setModalState(() {
-                            dataValidade = data;
-                          });
+                          final dia = int.tryParse(partes[0]);
+                          final mes = int.tryParse(partes[1]);
+                          final ano = int.tryParse(partes[2]);
+
+                          if (dia != null && mes != null && ano != null) {
+                            dataValidade = DateTime(
+                              ano,
+                              mes,
+                              dia,
+                            );
+                          }
                         }
                       },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 18,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F7FB),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          dataValidade == null
-                              ? 'Selecionar data de validade'
-                              : 'Validade: ${formatarData(dataValidade!)}',
-                          style: TextStyle(
-                            color: dataValidade == null
-                                ? const Color(0xFF718096)
-                                : const Color(0xFF1A202C),
-                          ),
-                        ),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     InkWell(
@@ -1059,6 +1084,78 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
             children: usuarios.map(usuarioCard).toList(),
           );
   }
+  
+  Future<void> selecionarDataInicio() async {
+    final data = await showDatePicker(
+      context: context,
+      initialDate: dataInicioFiltro ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      helpText: 'Selecionar data',
+      cancelText: 'Cancelar',
+      confirmText: 'Confirmar',
+      fieldLabelText: 'Data',
+      fieldHintText: 'dd/mm/aaaa',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFFE87722),
+              onPrimary: Colors.white,
+              onSurface: Color(0xFF1A202C),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (data != null) {
+      setState(() {
+        dataInicioFiltro = data;
+      });
+    }
+  }
+
+  Future<void> selecionarDataFim() async {
+    final data = await showDatePicker(
+      context: context,
+      initialDate: dataInicioFiltro ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      helpText: 'Selecionar data',
+      cancelText: 'Cancelar',
+      confirmText: 'Confirmar',
+      fieldLabelText: 'Data',
+      fieldHintText: 'dd/mm/aaaa',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFFE87722),
+              onPrimary: Colors.white,
+              onSurface: Color(0xFF1A202C),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (data != null) {
+      setState(() {
+        dataFimFiltro = data;
+      });
+    }
+  }
+
+  void limparFiltrosAvancados() {
+    setState(() {
+      tipoSelecionado = 'Todos';
+      dataInicioFiltro = null;
+      dataFimFiltro = null;
+    });
+  }
 
   Widget listaDocumentos() {
     final regular =
@@ -1067,11 +1164,39 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
         documentos.where((doc) => doc['status'] == 'A vencer').length;
     final vencidos =
         documentos.where((doc) => doc['status'] == 'Vencido').length;
-    final documentosFiltrados = filtroStatusSelecionado == null
-        ? documentos
-        : documentos
-            .where((doc) => doc['status'] == filtroStatusSelecionado)
-            .toList();
+    final documentosFiltrados = documentos.where((doc) {
+    final statusOk = filtroStatusSelecionado == null ||
+        doc['status'] == filtroStatusSelecionado;
+
+    final tipoOk = tipoSelecionado == 'Todos' ||
+        doc['categoria'] == tipoSelecionado;
+
+    final dataTexto = doc['dataValidade'];
+    final dataValidade =
+        dataTexto != null ? DateTime.tryParse(dataTexto.toString()) : null;
+
+    final dataInicioOk = dataInicioFiltro == null ||
+        (dataValidade != null &&
+            !dataValidade.isBefore(
+              DateTime(
+                dataInicioFiltro!.year,
+                dataInicioFiltro!.month,
+                dataInicioFiltro!.day,
+              ),
+            ));
+
+    final dataFimOk = dataFimFiltro == null ||
+        (dataValidade != null &&
+            !dataValidade.isAfter(
+              DateTime(
+                dataFimFiltro!.year,
+                dataFimFiltro!.month,
+                dataFimFiltro!.day,
+              ),
+            ));
+
+    return statusOk && tipoOk && dataInicioOk && dataFimOk;
+  }).toList();
 
     return Column(
       children: [
@@ -1118,6 +1243,154 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 14),
+
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  setState(() {
+                    mostrarFiltros = !mostrarFiltros;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.filter_alt_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Filtros avançados',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        mostrarFiltros
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              if (mostrarFiltros) ...[
+                const SizedBox(height: 14),
+
+                DropdownButtonFormField<String>(
+                  value: tipoSelecionado,
+                  dropdownColor: Colors.white,
+                  decoration: InputDecoration(
+                    hintText: 'Tipo de documento',
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  items: tiposDocumentosColaborador.map((tipo) {
+                    return DropdownMenuItem(
+                      value: tipo,
+                      child: Text(tipo),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      tipoSelecionado = value ?? 'Todos';
+                    });
+                  },
+                ),
+
+                const SizedBox(height: 10),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: selecionarDataInicio,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            dataInicioFiltro == null
+                                ? 'De:'
+                                : 'De: ${formatarData(dataInicioFiltro!)}',
+                            style: const TextStyle(
+                              color: Color(0xFF1A202C),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: InkWell(
+                        onTap: selecionarDataFim,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            dataFimFiltro == null
+                                ? 'Até:'
+                                : 'Até: ${formatarData(dataFimFiltro!)}',
+                            style: const TextStyle(
+                              color: Color(0xFF1A202C),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: limparFiltrosAvancados,
+                    icon: const Icon(Icons.filter_alt_off_rounded),
+                    label: const Text('Limpar filtros'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1168,6 +1441,9 @@ class _DocumentosScreenState extends State<DocumentosScreen> {
                     usuarioSelecionadoNome = null;
                     documentos = [];
                     filtroStatusSelecionado = null;
+                    tipoSelecionado = 'Todos';
+                    dataInicioFiltro = null;
+                    dataFimFiltro = null;
                   });
                 },
               )

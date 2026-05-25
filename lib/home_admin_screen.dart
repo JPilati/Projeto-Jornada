@@ -6,6 +6,7 @@ import 'main.dart';
 import 'equipamentos_screen.dart';
 import 'documentos_screen.dart';
 import 'colaboradores_screen.dart';
+import 'empresa_documentos_screen.dart';
 
 class HomeAdminScreen extends StatefulWidget {
   const HomeAdminScreen({super.key});
@@ -736,6 +737,21 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (_) => const DocumentosScreen(),
+                          ),
+                        ).then((_) => carregarDadosDashboard());
+                      },
+                    ),
+                    _buildAdminCard(
+                      icon: Icons.business_center_rounded,
+                      title: 'Empresa',
+                      subtitle: 'Documentos gerais',
+                      iconBgColor: const Color(0xFFE3F2FD),
+                      iconColor: const Color(0xFF1565C0),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const EmpresaDocumentosScreen(),
                           ),
                         ).then((_) => carregarDadosDashboard());
                       },

@@ -33,6 +33,9 @@ dependencies:
   # 🔹 IMAGENS
   image_picker: ^1.2.2
 
+  # 🔹 MÁSCARA DE DATA
+  mask_text_input_formatter: ^2.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
