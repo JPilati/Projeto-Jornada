@@ -1,8 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
+import 'frota_operador_screen.dart';
 import 'firebase_service.dart';
-import 'mapa_screen.dart';
 import 'documentos_screen.dart';
 import 'main.dart';
 
@@ -207,31 +206,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   childAspectRatio: 0.92,
                   children: [
                     _buildFeatureCard(
-                      icon: Icons.map,
-                      title: 'Mapa',
-                      subtitle: 'Visualizar frota',
-                      iconBgColor: Colors.blue.shade100,
-                      iconColor: Colors.blue,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const MapaScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    _buildFeatureCard(
-                      icon: Icons.description,
+                      icon: Icons.description_rounded,
                       title: 'Documentos',
                       subtitle: 'Meus documentos',
-                      iconBgColor: Colors.orange.shade100,
-                      iconColor: Colors.orange,
+                      iconBgColor: const Color(0xFFFFF3E0),
+                      iconColor: const Color(0xFFE87722),
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => const DocumentosScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    _buildFeatureCard(
+                      icon: Icons.local_shipping_rounded,
+                      title: 'Frota',
+                      subtitle: 'Meus veículos',
+                      iconBgColor: Colors.green.shade100,
+                      iconColor: Colors.green,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const FrotaOperadorScreen(),
                           ),
                         );
                       },

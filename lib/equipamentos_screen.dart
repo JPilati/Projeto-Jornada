@@ -18,6 +18,7 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
   bool isAdmin = false;
   String? filtroSelecionado;
   List<Map<String, dynamic>> equipamentos = [];
+  List<Map<String, dynamic>> operadores = [];
 
   @override
   void initState() {
@@ -39,20 +40,60 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
     return profile?['perfil'] == 'Administrador';
   }
 
+  Future<void> carregarOperadores() async {
+    final snapshot = await db
+        .collection('users')
+        .where('perfil', isEqualTo: 'Operador')
+        .orderBy('nome')
+        .get();
+
+    operadores = snapshot.docs.map((doc) {
+      return {
+        'id': doc.id,
+        ...doc.data(),
+      };
+    }).toList();
+  }
+
   Future<void> carregarTela() async {
     try {
       final adminFirestore = await verificarAdminNoFirestore();
 
-      final snapshot = await db.collection('equipamentos').orderBy('nome').get();
+      await carregarOperadores();
+
+      final snapshot = await db.collection('equipamentos').get();
 
       setState(() {
         isAdmin = adminFirestore;
-        equipamentos = snapshot.docs.map((doc) {
+
+        final listaEquipamentos = snapshot.docs.map((doc) {
           return {
             'id': doc.id,
             ...doc.data(),
           };
         }).toList();
+
+        listaEquipamentos.sort((a, b) {
+          final prioridade = {
+            'Inativo': 0,
+            'Manutenção': 1,
+            'Ativo': 2,
+          };
+
+          final statusA = prioridade[a['status']] ?? 3;
+          final statusB = prioridade[b['status']] ?? 3;
+
+          if (statusA != statusB) {
+            return statusA.compareTo(statusB);
+          }
+
+          final nomeA = (a['nome'] ?? '').toString().toLowerCase();
+          final nomeB = (b['nome'] ?? '').toString().toLowerCase();
+
+          return nomeA.compareTo(nomeB);
+        });
+
+        equipamentos = listaEquipamentos;
 
         carregando = false;
       });
@@ -119,6 +160,9 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         TextEditingController(text: equipamento?['capacidade'] ?? '');
 
     String statusSelecionado = equipamento?['status'] ?? 'Ativo';
+
+    List<String> operadoresSelecionados =
+        List<String>.from(equipamento?['operadoresPermitidos'] ?? []);
 
     await showModalBottomSheet(
       context: context,
@@ -193,6 +237,69 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                         });
                       },
                     ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Operadores autorizados',
+                      style: TextStyle(
+                        color: Color(0xFF1A202C),
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (operadores.isEmpty)
+                      const Text(
+                        'Nenhum operador cadastrado.',
+                        style: TextStyle(
+                          color: Color(0xFF718096),
+                          fontSize: 13,
+                        ),
+                      )
+                    else
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F7FB),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Column(
+                          children: operadores.map((operador) {
+                            final operadorId = operador['id'].toString();
+                            final nomeOperador = operador['nome'] ?? 'Operador';
+
+                            final selecionado =
+                                operadoresSelecionados.contains(operadorId);
+
+                            return CheckboxListTile(
+                              value: selecionado,
+                              activeColor: const Color(0xFFE87722),
+                              title: Text(
+                                nomeOperador,
+                                style: const TextStyle(
+                                  color: Color(0xFF1A202C),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                operador['cargo'] ?? '',
+                                style: const TextStyle(
+                                  color: Color(0xFF718096),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setModalState(() {
+                                  if (value == true) {
+                                    operadoresSelecionados.add(operadorId);
+                                  } else {
+                                    operadoresSelecionados.remove(operadorId);
+                                  }
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ),
+
                     const SizedBox(height: 22),
                     ElevatedButton(
                       onPressed: () async {
@@ -218,13 +325,14 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                                 .collection('equipamentos')
                                 .doc(equipamento['id'])
                                 .update({
-                              'nome': nomeController.text.trim(),
-                              'tipo': tipoController.text.trim(),
-                              'placa': placaController.text.trim(),
-                              'capacidade': capacidadeController.text.trim(),
-                              'status': statusSelecionado,
-                              'updatedAt': FieldValue.serverTimestamp(),
-                            });
+                                  'nome': nomeController.text.trim(),
+                                  'tipo': tipoController.text.trim(),
+                                  'placa': placaController.text.trim(),
+                                  'capacidade': capacidadeController.text.trim(),
+                                  'status': statusSelecionado,
+                                  'operadoresPermitidos': operadoresSelecionados,
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                });
                           } else {
                             await db.collection('equipamentos').add({
                               'nome': nomeController.text.trim(),
@@ -232,6 +340,7 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                               'placa': placaController.text.trim(),
                               'capacidade': capacidadeController.text.trim(),
                               'status': statusSelecionado,
+                              'operadoresPermitidos': operadoresSelecionados,
                               'createdAt': FieldValue.serverTimestamp(),
                             });
                           }

@@ -27,13 +27,12 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
 
   bool carregando = true;
   bool isAdmin = false;
-
-  Map<String, dynamic>? equipamento;
-  List<Map<String, dynamic>> documentos = [];
+  bool mostrarFiltros = false;
   String tipoSelecionado = 'Todos';
   DateTime? dataInicioFiltro;
   DateTime? dataFimFiltro;
-  bool mostrarFiltros = false;
+  Map<String, dynamic>? equipamento;
+  List<Map<String, dynamic>> documentos = [];
 
   final List<String> tiposDocumentosEquipamento = [
     'Todos',
@@ -74,11 +73,16 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         throw Exception('Veículo não encontrado.');
       }
 
-      final documentosSnapshot = await db
+      Query<Map<String, dynamic>> query = db
           .collection('documentos')
           .where('equipamentoId', isEqualTo: widget.equipamentoId)
-          .where('tipo', isEqualTo: 'equipamento')
-          .get();
+          .where('tipo', isEqualTo: 'equipamento');
+
+      if (!adminFirestore) {
+        query = query.where('visivelOperador', isEqualTo: true);
+      }
+
+      final documentosSnapshot = await query.get();
 
       final listaDocs = documentosSnapshot.docs.map((doc) {
         return {
@@ -88,14 +92,34 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
       }).toList();
 
       listaDocs.sort((a, b) {
-        final aCreated = a['createdAt'];
-        final bCreated = b['createdAt'];
+        final prioridade = {
+          'Vencido': 0,
+          'A vencer': 1,
+          'Regular': 2,
+        };
 
-        if (aCreated is Timestamp && bCreated is Timestamp) {
-          return bCreated.compareTo(aCreated);
+        final statusA = prioridade[a['status']] ?? 3;
+        final statusB = prioridade[b['status']] ?? 3;
+
+        if (statusA != statusB) {
+          return statusA.compareTo(statusB);
         }
 
-        return 0;
+        final validadeA = DateTime.tryParse(
+          a['dataValidade']?.toString() ?? '',
+        );
+
+        final validadeB = DateTime.tryParse(
+          b['dataValidade']?.toString() ?? '',
+        );
+
+        if (validadeA != null && validadeB != null) {
+          return validadeA.compareTo(validadeB);
+        }
+
+        return (a['titulo'] ?? '')
+            .toString()
+            .compareTo((b['titulo'] ?? '').toString());
       });
 
       setState(() {
@@ -229,6 +253,36 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
       ),
     );
   }
+  Future<void> alterarVisibilidadeDocumento(
+    Map<String, dynamic> documento,
+  ) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
+    final visivelAtual = documento['visivelOperador'] != false;
+    final novoValor = !visivelAtual;
+
+    try {
+      await db.collection('documentos').doc(documento['id']).update({
+        'visivelOperador': novoValor,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await carregarDados();
+
+      mostrarSucesso(
+        novoValor
+            ? 'Documento visível para operador.'
+            : 'Documento oculto para operador.',
+      );
+    } catch (e) {
+      mostrarErro('Erro ao alterar visibilidade: $e');
+    }
+  }
 
   Future<void> abrirFormularioDocumento({
     Map<String, dynamic>? documento,
@@ -317,6 +371,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                     'status': status,
                     'arquivoUrl': arquivoUrl,
                     'arquivoPath': arquivoPath,
+                    'visivelOperador': true,
                     'createdAt': FieldValue.serverTimestamp(),
                   });
                 }
@@ -726,6 +781,7 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
         : null;
 
     final arquivoUrl = documento['arquivoUrl']?.toString();
+    final visivelOperador = documento['visivelOperador'] != false;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -796,6 +852,33 @@ class _EquipamentoDetalhesScreenState extends State<EquipamentoDetalhesScreen> {
                         color: Color(0xFF718096),
                         fontSize: 11,
                       ),
+                    ),
+                  ],
+                  if (isAdmin) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          visivelOperador
+                              ? 'Visível para operador'
+                              : 'Oculto para operador',
+                          style: TextStyle(
+                            color: visivelOperador
+                                ? const Color(0xFF43A047)
+                                : const Color(0xFF718096),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Switch(
+                          value: visivelOperador,
+                          activeColor: const Color(0xFF43A047),
+                          onChanged: (_) {
+                            alterarVisibilidadeDocumento(documento);
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 ],

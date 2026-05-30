@@ -15,7 +15,7 @@ class DocumentosScreen extends StatefulWidget {
 }
 
 class _DocumentosScreenState 
-    extends State<DocumentosScreen> {
+  extends State<DocumentosScreen> {
   final db = FirebaseFirestore.instance;
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
@@ -148,28 +148,47 @@ class _DocumentosScreenState
       };
     }).toList();
 
-    lista.sort((a, b) { 
-	    final aResumo = contagem[a['id']] ?? {};
+    lista.sort((a, b) {
+      final aResumo = contagem[a['id']] ?? {};
       final bResumo = contagem[b['id']] ?? {};
+
       final aVencido = aResumo['Vencido'] ?? 0;
       final bVencido = bResumo['Vencido'] ?? 0;
+
       final aAVencer = aResumo['A vencer'] ?? 0;
       final bAVencer = bResumo['A vencer'] ?? 0;
 
-      if (bVencido != aVencido) {
-        return bVencido - aVencido; 
+      int prioridadeA;
+      int prioridadeB;
+
+      if (aVencido > 0) {
+        prioridadeA = 3;
+      } else if (aAVencer > 0) {
+        prioridadeA = 2;
+      } else {
+        prioridadeA = 1;
       }
 
-      if (bAVencer != aAVencer) {
-        return bAVencer - aAVencer; 
+      if (bVencido > 0) {
+        prioridadeB = 3;
+      } else if (bAVencer > 0) {
+        prioridadeB = 2;
+      } else {
+        prioridadeB = 1;
+      }
+
+      if (prioridadeA != prioridadeB) {
+        return prioridadeA.compareTo(prioridadeB);
       }
 
       return (a['nome'] ?? '')
-        .toString()
-        .toLowerCase()
-        .compareTo(
-          (b['nome'] ?? '').toString().toLowerCase(),
-        );
+          .toString()
+          .toLowerCase()
+          .compareTo(
+            (b['nome'] ?? '')
+                .toString()
+                .toLowerCase(),
+          );
     });
 
     setState(() {
@@ -179,11 +198,18 @@ class _DocumentosScreenState
   }
 
   Future<void> carregarDocumentos(String usuarioId) async {
-    final snapshot = await db
-        .collection('documentos')
-        .where('usuarioId', isEqualTo: usuarioId)
-        .where('tipo', isEqualTo: 'operador')
-        .get();
+    Query<Map<String, dynamic>> query = db
+      .collection('documentos')
+      .where('usuarioId', isEqualTo: usuarioId)
+      .where('tipo', isEqualTo: 'operador');
+      if (!isAdmin) {
+        query = query.where(
+          'visivelOperador',
+          isEqualTo: true,
+        );
+      }
+
+    final snapshot = await query.get();
 
     final lista = snapshot.docs.map((doc) {
       return {
@@ -193,10 +219,46 @@ class _DocumentosScreenState
     }).toList();
 
     lista.sort((a, b) {
+      final statusA = a['status'] ?? 'Regular';
+      final statusB = b['status'] ?? 'Regular';
+
+      int prioridadeA;
+      int prioridadeB;
+
+      switch (statusA) {
+        case 'Vencido':
+          prioridadeA = 1;
+          break;
+        case 'A vencer':
+          prioridadeA = 2;
+          break;
+        default:
+          prioridadeA = 3;
+      }
+
+      switch (statusB) {
+        case 'Vencido':
+          prioridadeB = 1;
+          break;
+        case 'A vencer':
+          prioridadeB = 2;
+          break;
+        default:
+          prioridadeB = 3;
+      }
+
+      if (prioridadeA != prioridadeB) {
+        return prioridadeA.compareTo(prioridadeB);
+      }
+
       return (a['titulo'] ?? '')
           .toString()
           .toLowerCase()
-          .compareTo((b['titulo'] ?? '').toString().toLowerCase());
+          .compareTo(
+            (b['titulo'] ?? '')
+                .toString()
+                .toLowerCase(),
+          );
     });
 
     setState(() {
@@ -613,6 +675,7 @@ class _DocumentosScreenState
       'status': status,
       'arquivoUrl': arquivoUrl,
       'arquivoPath': arquivoPath,
+      'visivelOperador': true,
       'createdAt': FieldValue.serverTimestamp(),
     });
 
@@ -710,6 +773,40 @@ class _DocumentosScreenState
         ],
       ),
     );
+  }
+
+  Future<void> alterarVisibilidadeDocumento(
+    Map<String, dynamic> documento,
+  ) async {
+    final adminFirestore = await verificarAdminNoFirestore();
+
+    if (!adminFirestore) {
+      mostrarErro('Acesso somente leitura para operadores.');
+      return;
+    }
+
+    final visivelAtual = documento['visivelOperador'] != false;
+    final novoValor = !visivelAtual;
+
+    try {
+      await db.collection('documentos').doc(documento['id']).update({
+        'visivelOperador': novoValor,
+      });
+
+      if (usuarioSelecionadoId != null) {
+        await carregarDocumentos(usuarioSelecionadoId!);
+      }
+
+      await carregarUsuariosParaAdmin();
+
+      mostrarSucesso(
+        novoValor
+            ? 'Documento visível para o operador.'
+            : 'Documento oculto para o operador.',
+      );
+    } catch (e) {
+      mostrarErro('Erro ao alterar visibilidade: $e');
+    }
   }
 
   Widget resumoCard(String titulo, int quantidade, Color cor) {
@@ -938,6 +1035,8 @@ class _DocumentosScreenState
 
     final arquivoUrl = documento['arquivoUrl']?.toString();
 
+    final visivelOperador = documento['visivelOperador'] != false;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
@@ -1013,6 +1112,33 @@ class _DocumentosScreenState
                         color: Color(0xFF718096),
                         fontSize: 11,
                       ),
+                    ),
+                  ],
+                  if (isAdmin) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          visivelOperador
+                              ? 'Visível para operador'
+                              : 'Oculto para operador',
+                          style: TextStyle(
+                            color: visivelOperador
+                                ? const Color(0xFF43A047)
+                                : const Color(0xFF718096),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Switch(
+                          value: visivelOperador,
+                          activeColor: const Color(0xFF43A047),
+                          onChanged: (_) {
+                            alterarVisibilidadeDocumento(documento);
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 ],

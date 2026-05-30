@@ -709,12 +709,11 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                       },
                     ),
                     _buildAdminCard(
-                      icon: Icons.precision_manufacturing_rounded,
+                      icon: Icons.local_shipping_rounded,
                       title: 'Frota',
-                      subtitle:
-                          '$equipamentosAtivos ativos / $equipamentosManutencao manutenção',
-                      iconBgColor: const Color(0xFFEDE7F6),
-                      iconColor: const Color(0xFF6A1B9A),
+                      subtitle: 'Gestão de veículos',
+                      iconBgColor: const Color(0xFFE8F5E9),
+                      iconColor: const Color(0xFF43A047),
                       onTap: () {
                         Navigator.push(
                           context,

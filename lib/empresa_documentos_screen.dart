@@ -25,6 +25,7 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
   bool mostrarFiltros = false;
 
   String tipoSelecionado = 'Todos';
+  String? filtroStatusSelecionado;
   DateTime? dataInicioFiltro;
   DateTime? dataFimFiltro;
 
@@ -78,10 +79,19 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
       }).toList();
 
       lista.sort((a, b) {
+        final prioridadeA = prioridadeStatusEmpresa(a['status'] ?? 'ok');
+        final prioridadeB = prioridadeStatusEmpresa(b['status'] ?? 'ok');
+
+        if (prioridadeA != prioridadeB) {
+          return prioridadeA.compareTo(prioridadeB);
+        }
+
         return (a['nome'] ?? '')
             .toString()
             .toLowerCase()
-            .compareTo((b['nome'] ?? '').toString().toLowerCase());
+            .compareTo(
+              (b['nome'] ?? '').toString().toLowerCase(),
+            );
       });
 
       setState(() {
@@ -131,6 +141,11 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
     if (status == 'expired') return 'Vencido';
     if (status == 'warning') return 'A vencer';
     return 'Regular';
+  }
+  int prioridadeStatusEmpresa(String status) {
+    if (status == 'ok') return 1;       // regular
+    if (status == 'warning') return 2;  // a vencer
+    return 3;                           // vencido
   }
 
   DateTime? parseData(dynamic value) {
@@ -651,32 +666,42 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
   }
 
   Widget resumoCard(String titulo, int quantidade, Color cor) {
+    final selecionado = filtroStatusSelecionado == titulo;
+
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            Text(
-              quantidade.toString(),
-              style: TextStyle(
-                color: cor,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          setState(() {
+            filtroStatusSelecionado = selecionado ? null : titulo;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: selecionado ? cor : cor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: [
+              Text(
+                quantidade.toString(),
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            Text(
-              titulo,
-              style: TextStyle(
-                color: cor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              Text(
+                titulo,
+                style: TextStyle(
+                  color: selecionado ? Colors.white : cor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -823,7 +848,8 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
   }
 
   Widget listaDocumentos() {
-    final regulares = documentos.where((doc) => doc['status'] == 'ok').length;
+    final regulares =
+        documentos.where((doc) => doc['status'] == 'ok').length;
 
     final aVencer =
         documentos.where((doc) => doc['status'] == 'warning').length;
@@ -832,10 +858,16 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
         documentos.where((doc) => doc['status'] == 'expired').length;
 
     final documentosFiltrados = documentos.where((doc) {
-      final tipoOk =
-          tipoSelecionado == 'Todos' || doc['tipo'] == tipoSelecionado;
+      final statusOk = filtroStatusSelecionado == null ||
+          textoStatus(doc['status'] ?? 'ok') ==
+              filtroStatusSelecionado;
 
-      final vencimento = parseData(doc['data_vencimento']);
+      final tipoOk =
+          tipoSelecionado == 'Todos' ||
+          doc['tipo'] == tipoSelecionado;
+
+      final vencimento =
+          parseData(doc['data_vencimento']);
 
       final dataInicioOk = dataInicioFiltro == null ||
           (vencimento != null &&
@@ -857,20 +889,41 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                 ),
               ));
 
-      return tipoOk && dataInicioOk && dataFimOk;
+      return statusOk &&
+          tipoOk &&
+          dataInicioOk &&
+          dataFimOk;
     }).toList();
 
     documentosFiltrados.sort((a, b) {
+      final prioridadeA =
+          prioridadeStatusEmpresa(a['status'] ?? 'ok');
+      final prioridadeB =
+          prioridadeStatusEmpresa(b['status'] ?? 'ok');
+
+      if (prioridadeA != prioridadeB) {
+        return prioridadeA.compareTo(prioridadeB);
+      }
+
       return (a['nome'] ?? '')
           .toString()
           .toLowerCase()
-          .compareTo((b['nome'] ?? '').toString().toLowerCase());
+          .compareTo(
+            (b['nome'] ?? '')
+                .toString()
+                .toLowerCase(),
+          );
     });
 
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          padding: const EdgeInsets.fromLTRB(
+            20,
+            18,
+            20,
+            24,
+          ),
           decoration: const BoxDecoration(
             color: Color(0xFF0D1B2A),
             borderRadius: BorderRadius.vertical(
@@ -901,21 +954,27 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                 ],
               ),
               const SizedBox(height: 14),
+
               InkWell(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius:
+                    BorderRadius.circular(14),
                 onTap: () {
                   setState(() {
-                    mostrarFiltros = !mostrarFiltros;
+                    mostrarFiltros =
+                        !mostrarFiltros;
                   });
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
+                  padding:
+                      const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 14,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(14),
+                    color: Colors.white
+                        .withOpacity(0.08),
+                    borderRadius:
+                        BorderRadius.circular(14),
                   ),
                   child: Row(
                     children: [
@@ -930,36 +989,47 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                           'Filtros avançados',
                           style: TextStyle(
                             color: Colors.white,
-                            fontWeight: FontWeight.w600,
+                            fontWeight:
+                                FontWeight.w600,
                           ),
                         ),
                       ),
                       Icon(
                         mostrarFiltros
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
+                            ? Icons
+                                .keyboard_arrow_up_rounded
+                            : Icons
+                                .keyboard_arrow_down_rounded,
                         color: Colors.white,
                       ),
                     ],
                   ),
                 ),
               ),
+
               if (mostrarFiltros) ...[
                 const SizedBox(height: 14),
+
                 DropdownButtonFormField<String>(
                   value: tipoSelecionado,
                   dropdownColor: Colors.white,
                   decoration: InputDecoration(
-                    hintText: 'Tipo de documento',
+                    hintText:
+                        'Tipo de documento',
                     filled: true,
                     fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
+                    contentPadding:
+                        const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 16,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
+                    border:
+                        OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(
+                              16),
+                      borderSide:
+                          BorderSide.none,
                     ),
                   ),
                   items: tiposEmpresa.map((tipo) {
@@ -970,57 +1040,86 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                   }).toList(),
                   onChanged: (value) {
                     setState(() {
-                      tipoSelecionado = value ?? 'Todos';
+                      tipoSelecionado =
+                          value ?? 'Todos';
                     });
                   },
                 ),
+
                 const SizedBox(height: 10),
+
                 Row(
                   children: [
                     Expanded(
                       child: InkWell(
-                        onTap: selecionarDataInicio,
+                        onTap:
+                            selecionarDataInicio,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
+                          padding:
+                              const EdgeInsets
+                                  .symmetric(
                             horizontal: 14,
                             vertical: 16,
                           ),
-                          decoration: BoxDecoration(
+                          decoration:
+                              BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius:
+                                BorderRadius
+                                    .circular(
+                                        14),
                           ),
                           child: Text(
-                            dataInicioFiltro == null
+                            dataInicioFiltro ==
+                                    null
                                 ? 'De:'
                                 : 'De: ${formatarData(dataInicioFiltro!)}',
-                            style: const TextStyle(
-                              color: Color(0xFF1A202C),
-                              fontWeight: FontWeight.w600,
+                            style:
+                                const TextStyle(
+                              color: Color(
+                                  0xFF1A202C),
+                              fontWeight:
+                                  FontWeight
+                                      .w600,
                             ),
                           ),
                         ),
                       ),
                     ),
+
                     const SizedBox(width: 10),
+
                     Expanded(
                       child: InkWell(
-                        onTap: selecionarDataFim,
+                        onTap:
+                            selecionarDataFim,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
+                          padding:
+                              const EdgeInsets
+                                  .symmetric(
                             horizontal: 14,
                             vertical: 16,
                           ),
-                          decoration: BoxDecoration(
+                          decoration:
+                              BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius:
+                                BorderRadius
+                                    .circular(
+                                        14),
                           ),
                           child: Text(
-                            dataFimFiltro == null
+                            dataFimFiltro ==
+                                    null
                                 ? 'Até:'
                                 : 'Até: ${formatarData(dataFimFiltro!)}',
-                            style: const TextStyle(
-                              color: Color(0xFF1A202C),
-                              fontWeight: FontWeight.w600,
+                            style:
+                                const TextStyle(
+                              color: Color(
+                                  0xFF1A202C),
+                              fontWeight:
+                                  FontWeight
+                                      .w600,
                             ),
                           ),
                         ),
@@ -1028,15 +1127,26 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                     ),
                   ],
                 ),
+
                 const SizedBox(height: 10),
+
                 Align(
-                  alignment: Alignment.centerRight,
+                  alignment:
+                      Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: limparFiltros,
-                    icon: const Icon(Icons.filter_alt_off_rounded),
-                    label: const Text('Limpar filtros'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.white,
+                    onPressed:
+                        limparFiltros,
+                    icon: const Icon(
+                      Icons
+                          .filter_alt_off_rounded,
+                    ),
+                    label: const Text(
+                      'Limpar filtros',
+                    ),
+                    style:
+                        TextButton.styleFrom(
+                      foregroundColor:
+                          Colors.white,
                     ),
                   ),
                 ),
@@ -1044,14 +1154,21 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
             ],
           ),
         ),
+
         Expanded(
           child: documentosFiltrados.isEmpty
               ? const Center(
-                  child: Text('Nenhum documento da empresa encontrado.'),
+                  child: Text(
+                    'Nenhum documento da empresa encontrado.',
+                  ),
                 )
               : ListView(
-                  padding: const EdgeInsets.all(18),
-                  children: documentosFiltrados.map(documentoCard).toList(),
+                  padding:
+                      const EdgeInsets.all(18),
+                  children:
+                      documentosFiltrados
+                          .map(documentoCard)
+                          .toList(),
                 ),
         ),
       ],

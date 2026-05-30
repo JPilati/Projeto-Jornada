@@ -654,20 +654,22 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final total = colaboradores.length;
+    final inativos =
+        colaboradores.where((user) => user['status'] == 'Inativo').length;
     final ativos =
         colaboradores.where((user) => user['status'] == 'Ativo').length;
     final admins = colaboradores
         .where((user) => user['perfil'] == 'Administrador')
         .length;
-    final colaboradoresFiltrados = filtroSelecionado == null ||
-          filtroSelecionado == 'Total'
-      ? colaboradores
-      : filtroSelecionado == 'Ativos'
-          ? colaboradores.where((user) => user['status'] == 'Ativo').toList()
-          : colaboradores
-              .where((user) => user['perfil'] == 'Administrador')
-              .toList();
+    final colaboradoresFiltrados = filtroSelecionado == null
+        ? colaboradores
+        : filtroSelecionado == 'Ativos'
+            ? colaboradores.where((user) => user['status'] == 'Ativo').toList()
+            : filtroSelecionado == 'Inativos'
+                ? colaboradores.where((user) => user['status'] == 'Inativo').toList()
+                : colaboradores
+                    .where((user) => user['perfil'] == 'Administrador')
+                    .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7FB),
@@ -703,9 +705,9 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
             child: Row(
               children: [
                 _buildResumo(
-                  total.toString(),
-                  'Total',
-                  const Color(0xFF1976D2),
+                  inativos.toString(),
+                  'Inativos',
+                  const Color(0xFFE53935),
                 ),
                 const SizedBox(width: 10),
                 _buildResumo(
