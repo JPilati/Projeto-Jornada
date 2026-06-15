@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'app_responsive.dart';
+import 'app_theme.dart';
 import 'equipamento_detalhes_screen.dart';
 
 class FrotaOperadorScreen extends StatefulWidget {
@@ -99,11 +101,13 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface(context),
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.border(context)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color:
+                  Colors.black.withValues(alpha: AppTheme.isDark(context) ? 0.22 : 0.06),
               blurRadius: 10,
               offset: const Offset(0, 5),
             ),
@@ -126,8 +130,8 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
                 children: [
                   Text(
                     equipamento['nome'] ?? '',
-                    style: const TextStyle(
-                      color: Color(0xFF1A202C),
+                    style: TextStyle(
+                      color: AppTheme.textPrimary(context),
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -135,16 +139,16 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
                   const SizedBox(height: 4),
                   Text(
                     equipamento['tipo'] ?? 'Sem tipo',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary(context),
                       fontSize: 13,
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Placa: ${equipamento['placa'] ?? '-'}',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary(context),
                       fontSize: 12,
                     ),
                   ),
@@ -178,7 +182,7 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Minha Frota',
@@ -187,17 +191,18 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: const Color(0xFF0D1B2A),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: carregando
           ? const Center(child: CircularProgressIndicator())
-          : equipamentos.isEmpty
-              ? const Center(
+          : AppResponsiveBody(
+              child: equipamentos.isEmpty
+              ? Center(
                   child: Text(
                     'Nenhum veículo atribuído.',
                     style: TextStyle(
-                      color: Color(0xFF718096),
+                      color: AppTheme.textSecondary(context),
                       fontSize: 15,
                     ),
                   ),
@@ -206,6 +211,7 @@ class _FrotaOperadorScreenState extends State<FrotaOperadorScreen> {
                   padding: const EdgeInsets.all(18),
                   children: equipamentos.map(equipamentoCard).toList(),
                 ),
+            ),
     );
   }
 }

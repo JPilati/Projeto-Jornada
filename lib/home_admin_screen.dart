@@ -7,6 +7,10 @@ import 'equipamentos_screen.dart';
 import 'documentos_screen.dart';
 import 'colaboradores_screen.dart';
 import 'empresa_documentos_screen.dart';
+import 'app_responsive.dart';
+import 'app_settings.dart';
+import 'app_theme.dart';
+import 'configuracoes_screen.dart';
 
 class HomeAdminScreen extends StatefulWidget {
   const HomeAdminScreen({super.key});
@@ -33,6 +37,17 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
   @override
   void initState() {
     super.initState();
+    appSettings.addListener(_recarregarNotificacoes);
+    carregarDadosDashboard();
+  }
+
+  @override
+  void dispose() {
+    appSettings.removeListener(_recarregarNotificacoes);
+    super.dispose();
+  }
+
+  void _recarregarNotificacoes() {
     carregarDadosDashboard();
   }
 
@@ -52,7 +67,9 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
 
       final equipamentosSnapshot = await db.collection('equipamentos').get();
 
-      final documentosSnapshot = await db.collection('documentos').get();
+      final documentosSnapshot = appSettings.notificationsEnabled
+          ? await db.collection('documentos').get()
+          : null;
 
       final usuariosSnapshot = await db.collection('users').get();
 
@@ -70,14 +87,15 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
 
       final hoje = DateTime.now();
       final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
-      final limite = hojeSemHora.add(const Duration(days: 30));
+      final limite =
+          hojeSemHora.add(Duration(days: appSettings.notificationDays));
 
       final operadorVencidos = <Map<String, dynamic>>[];
       final operadorAVencer = <Map<String, dynamic>>[];
       final equipamentoVencidos = <Map<String, dynamic>>[];
       final equipamentoAVencer = <Map<String, dynamic>>[];
 
-      for (final doc in documentosSnapshot.docs) {
+      for (final doc in documentosSnapshot?.docs ?? []) {
         final data = doc.data();
 
         final dataTexto = data['dataValidade'];
@@ -89,7 +107,7 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
         final validadeSemHora =
             DateTime(validade.year, validade.month, validade.day);
 
-        final documentoCompleto = {
+        final documentoCompleto = <String, dynamic>{
           'id': doc.id,
           ...data,
         };
@@ -182,7 +200,7 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.surface(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
@@ -206,8 +224,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                 const SizedBox(height: 22),
                 Text(
                   doc['titulo'] ?? 'Documento',
-                  style: const TextStyle(
-                    color: Color(0xFF1A202C),
+                  style: TextStyle(
+                    color: AppTheme.textPrimary(context),
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
@@ -215,8 +233,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                 const SizedBox(height: 8),
                 Text(
                   doc['categoria'] ?? 'Sem categoria',
-                  style: const TextStyle(
-                    color: Color(0xFF718096),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary(context),
                     fontSize: 14,
                   ),
                 ),
@@ -285,16 +303,16 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
         children: [
           Text(
             '$label: ',
-            style: const TextStyle(
-              color: Color(0xFF718096),
+            style: TextStyle(
+              color: AppTheme.textSecondary(context),
               fontWeight: FontWeight.w600,
             ),
           ),
           Expanded(
             child: Text(
               valor,
-              style: const TextStyle(
-                color: Color(0xFF1A202C),
+              style: TextStyle(
+                color: AppTheme.textPrimary(context),
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -317,11 +335,13 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface(context),
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.border(context)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color:
+                  Colors.black.withValues(alpha: AppTheme.isDark(context) ? 0.22 : 0.08),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -343,8 +363,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF1A202C),
+              style: TextStyle(
+                color: AppTheme.textPrimary(context),
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -353,8 +373,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF718096),
+              style: TextStyle(
+                color: AppTheme.textSecondary(context),
                 fontSize: 12,
               ),
             ),
@@ -407,7 +427,7 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
   void abrirMenuNotificacoes() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.surface(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -461,7 +481,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                 if (docsOperadorAVencer.isNotEmpty) ...[
                   _buildGrupoNotificacao(
                     titulo: 'Operadores — a vencer',
-                    subtitulo: 'Documentos de funcionários em até 30 dias',
+                    subtitulo:
+                        'Documentos de funcionários em até ${appSettings.notificationDays} dias',
                     documentos: docsOperadorAVencer,
                     cor: const Color(0xFFE87722),
                     icone: Icons.person_search_rounded,
@@ -482,7 +503,7 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                   _buildGrupoNotificacao(
                     titulo: 'Equipamentos — a vencer',
                     subtitulo:
-                        'Documentos de veículos/equipamentos em até 30 dias',
+                        'Documentos de veículos/equipamentos em até ${appSettings.notificationDays} dias',
                     documentos: docsEquipamentoAVencer,
                     cor: const Color(0xFFE87722),
                     icone: Icons.build_circle_outlined,
@@ -507,11 +528,13 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surface(context),
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.border(context)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color:
+                Colors.black.withValues(alpha: AppTheme.isDark(context) ? 0.22 : 0.06),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -532,8 +555,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                   children: [
                     Text(
                       titulo,
-                      style: const TextStyle(
-                        color: Color(0xFF1A202C),
+                      style: TextStyle(
+                        color: AppTheme.textPrimary(context),
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
@@ -541,8 +564,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                     const SizedBox(height: 3),
                     Text(
                       subtitulo,
-                      style: const TextStyle(
-                        color: Color(0xFF718096),
+                      style: TextStyle(
+                        color: AppTheme.textSecondary(context),
                         fontSize: 12,
                       ),
                     ),
@@ -579,8 +602,8 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                       Expanded(
                         child: Text(
                           '${doc['titulo']} • ${nomeOrigemDocumento(doc)}',
-                          style: const TextStyle(
-                            color: Color(0xFF1A202C),
+                          style: TextStyle(
+                            color: AppTheme.textPrimary(context),
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
@@ -607,14 +630,16 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = AppResponsive.isDesktop(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       body: SafeArea(
-        child: Column(
+        child: AppResponsiveBody(
+          child: Column(
           children: [
             Container(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
-              color: const Color(0xFF0D1B2A),
+              color: Theme.of(context).appBarTheme.backgroundColor,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -688,10 +713,10 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: GridView.count(
-                  crossAxisCount: 2,
+                  crossAxisCount: isDesktop ? 4 : 2,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: 0.92,
+                  childAspectRatio: isDesktop ? 1.35 : 0.92,
                   children: [
                     _buildAdminCard(
                       icon: Icons.people_alt_rounded,
@@ -755,11 +780,27 @@ class _HomeAdminScreenState extends State<HomeAdminScreen> {
                         ).then((_) => carregarDadosDashboard());
                       },
                     ),
+                    _buildAdminCard(
+                      icon: Icons.settings_rounded,
+                      title: 'Configurações',
+                      subtitle: 'Preferências do sistema',
+                      iconBgColor: const Color(0xFFEDE7F6),
+                      iconColor: const Color(0xFF5E35B1),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ConfiguracoesScreen(),
+                          ),
+                        ).then((_) => carregarDadosDashboard());
+                      },
+                    ),
                   ],
                 ),
               ),
             ),
           ],
+          ),
         ),
       ),
     );

@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_settings.dart';
+
 class FirebaseService {
   FirebaseService._();
 
@@ -28,7 +30,7 @@ class FirebaseService {
     final dias = validadeSemHora.difference(hojeSemHora).inDays;
 
     if (dias < 0) return 'Vencido';
-    if (dias <= 30) return 'A vencer';
+    if (dias <= appSettings.notificationDays) return 'A vencer';
     return 'Regular';
   }
 

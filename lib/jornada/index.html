@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hub Digital Ribas</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="login-page">
+    <div class="login-left">
+      <img class="login-logo" src="https://via.placeholder.com/120x120/E87722/ffffff?text=HD" alt="Logo">
+      <div class="login-tagline">Hub Digital<br>Guindaste Ribas</div>
+      <div class="login-sub">Sistema integrado de gestão operacional</div>
+    </div>
+    <div class="login-right">
+      <div class="login-form-title">Login</div>
+      <div class="login-form-sub">Acesse sua conta para continuar</div>
+      <div class="login-error" id="login-error">Matrícula ou senha incorretos.</div>
+      <div class="login-input-group">
+        <label>Matrícula</label>
+        <div class="input-wrap">
+          <input type="number" id="matricula-input" placeholder="Digite sua matrícula">
+        </div>
+      </div>
+      <div class="login-input-group">
+        <label>Senha</label>
+        <div class="input-wrap">
+          <input type="password" id="senha-input" placeholder="Digite sua senha">
+          <span class="input-eye" onclick="toggleSenha()">👁</span>
+        </div>
+      </div>
+      <button class="login-btn" onclick="realizarLogin()">Entrar</button>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <img src="https://via.placeholder.com/40x40/E87722/ffffff?text=HD" alt="Logo">
+        <div>
+          <div class="sidebar-logo-text">Hub Digital</div>
+          <div class="sidebar-logo-sub">Ribas do Rio Pardo</div>
+        </div>
+      </div>
+
+      <div class="sidebar-user">
+        <div class="user-avatar" id="sidebar-avatar">OP</div>
+        <div>
+          <div class="user-name" id="sidebar-name">Operador</div>
+          <div class="user-role" id="sidebar-role">Operador</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebar-nav">
+        </nav>
+
+      <div class="sidebar-footer">
+        <button class="logout-btn" onclick="logout()">
+          <span>🚪</span> Sair do sistema
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-title" id="topbar-title">Painel</div>
+        <div class="topbar-search">
+          <span class="topbar-icon">🔍</span>
+          <input type="text" placeholder="Buscar..." id="search-input" oninput="buscarGlobal(this.value)">
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="page active" id="page-dashboard">
+          <div class="page-header">
+            <h1>Painel de Gestão</h1>
+            <p>Visão geral do sistema — atualizado agora</p>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card green">
+              <div class="stat-icon green">👥</div>
+              <div class="stat-value" id="stat-colaboradores">—</div>
+              <div class="stat-label">Colaboradores ativos</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-icon green">🚛</div>
+              <div class="stat-value" id="stat-frota-ativa">—</div>
+              <div class="stat-label">Frota ativa</div>
+            </div>
+            <div class="stat-card amber">
+              <div class="stat-icon orange">🔧</div>
+              <div class="stat-value" id="stat-manutencao">—</div>
+              <div class="stat-label">Em manutenção</div>
+            </div>
+            <div class="stat-card red">
+              <div class="stat-icon red">⚠️</div>
+              <div class="stat-value" id="stat-pendencias">—</div>
+              <div class="stat-label">Pendências de doc.</div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div>
+              <div class="section-title">Documentos Vencidos</div>
+              <div id="dash-vencidos"></div>
+            </div>
+            <div>
+              <div class="section-title">Documentos a Vencer (30 dias)</div>
+              <div id="dash-avencer"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="page" id="page-colaboradores">
+          <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <h1>Colaboradores</h1>
+              <p>Gestão de operadores e usuários do sistema</p>
+            </div>
+            <button class="btn btn-primary" id="btn-novo-colab" onclick="abrirModalColab()">+ Novo colaborador</button>
+          </div>
+          <div class="filter-bar">
+            <select class="filter-select" onchange="filtrarColabs(this.value)">
+              <option value="">Todos os perfis</option>
+              <option value="Operador">Operadores</option>
+              <option value="Administrador">Administradores</option>
+            </select>
+            <select class="filter-select" onchange="filtrarColabsStatus(this.value)">
+              <option value="">Todos os status</option>
+              <option value="Ativo">Ativos</option>
+              <option value="Inativo">Inativos</option>
+            </select>
+          </div>
+          <div class="collab-grid" id="collab-grid"></div>
+        </div>
+
+        <div class="page" id="page-documentos">
+          <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <h1>Documentos</h1>
+              <p>Controle de validade de documentos dos operadores</p>
+            </div>
+            <button class="btn btn-primary" id="btn-novo-doc" onclick="abrirModalDoc()">+ Novo documento</button>
+          </div>
+          <div class="filter-bar">
+            <select class="filter-select" id="filtro-doc-usuario" onchange="filtrarDocs()">
+              <option value="">Todos os operadores</option>
+            </select>
+            <select class="filter-select" id="filtro-doc-tipo" onchange="filtrarDocs()">
+              <option value="">Todos os tipos</option>
+              <option>ASO</option><option>CNH</option><option>Toxicológico</option>
+              <option>NR-06</option><option>NR-11</option><option>NR-11/18</option>
+              <option>NR-12</option><option>NR-18</option><option>NR-35</option>
+              <option>Direção Defensiva</option><option>Integração por Cliente</option>
+              <option>Cinto Paraquedista / CA</option><option>Ficha de EPI / OS</option>
+            </select>
+            <select class="filter-select" id="filtro-doc-status" onchange="filtrarDocs()">
+              <option value="">Todos os status</option>
+              <option>Regular</option><option>A vencer</option><option>Vencido</option>
+            </select>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Título / Tipo</th>
+                    <th>Operador</th>
+                    <th>Validade</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="docs-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="page" id="page-frota">
+          <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <h1>Frota & Equipamentos</h1>
+              <p>Gestão de veículos e equipamentos</p>
+            </div>
+            <button class="btn btn-primary" id="btn-novo-equip" onclick="abrirModalEquip()">+ Novo equipamento</button>
+          </div>
+          <div class="filter-bar">
+            <select class="filter-select" onchange="filtrarEquips(this.value)">
+              <option value="">Todos os status</option>
+              <option value="Ativo">Ativos</option>
+              <option value="Manutenção">Em manutenção</option>
+              <option value="Inativo">Inativos</option>
+            </select>
+          </div>
+          <div class="equip-grid" id="equip-grid"></div>
+        </div>
+
+        <div class="page" id="page-empresa">
+          <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <h1>Documentos da Empresa</h1>
+              <p>Certificações, alvarás e documentos institucionais</p>
+            </div>
+            <button class="btn btn-primary" onclick="abrirModalEmpresa()">+ Novo documento</button>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Documento</th>
+                    <th>Categoria</th>
+                    <th>Validade</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="page" id="page-mapa">
+          <div class="page-header">
+            <h1>Mapa de Frota</h1>
+            <p>Localização em tempo real dos equipamentos</p>
+          </div>
+          <div class="map-placeholder">
+            <div class="map-dot" style="width:12px;height:12px;top:35%;left:45%"></div>
+            <div class="map-dot" style="width:10px;height:10px;top:55%;left:60%;animation-delay:0.5s"></div>
+            <div class="map-dot" style="width:8px;height:8px;top:40%;left:30%;animation-delay:1s"></div>
+            <span class="map-emoji">🗺️</span>
+            <span>Mapa de rastreamento — Ribas do Rio Pardo</span>
+            <span style="font-size:12px;opacity:0.5">Integração com flutter_map / OpenStreetMap</span>
+          </div>
+        </div>
+
+        <div class="page" id="page-qrcode">
+          <div class="page-header">
+            <h1>Meu QR Code</h1>
+            <p>Identificação digital do operador</p>
+          </div>
+          <div class="qr-box">
+            <div class="qr-placeholder">📱</div>
+            <div style="font-weight:700;font-size:16px" id="qr-nome">Operador</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:13px" id="qr-mat">Matrícula: —</div>
+            <div style="color:rgba(255,255,255,0.4);font-size:12px">Apresente este código para identificação</div>
+          </div>
+        </div>
+
+        <div class="page" id="page-senha">
+          <div class="page-header">
+            <h1>Alterar Senha</h1>
+            <p>Atualize sua senha de acesso ao sistema</p>
+          </div>
+          <div class="card" style="max-width:420px">
+            <div class="form-group">
+              <label>Senha atual</label>
+              <input type="password" placeholder="••••••••">
+            </div>
+            <div class="form-group">
+              <label>Nova senha</label>
+              <input type="password" placeholder="••••••••">
+            </div>
+            <div class="form-group">
+              <label>Confirmar nova senha</label>
+              <input type="password" placeholder="••••••••">
+            </div>
+            <button class="btn btn-primary" onclick="showToast('Senha alterada com sucesso!','success')">Salvar alterações</button>
+          </div>
+        </div>
+
+        <div class="page" id="page-meus-docs">
+          <div class="page-header">
+            <h1>Meus Documentos</h1>
+            <p>Consulte seus documentos e validades</p>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Tipo</th><th>Validade</th><th>Status</th><th>Arquivo</th></tr>
+                </thead>
+                <tbody id="meus-docs-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="page" id="page-minha-frota">
+          <div class="page-header">
+            <h1>Minha Frota</h1>
+            <p>Veículos e equipamentos sob sua responsabilidade</p>
+          </div>
+          <div class="equip-grid" id="minha-frota-grid"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-colab">
+    <div class="modal">
+      <div class="modal-title">👤 <span id="modal-colab-title">Novo Colaborador</span></div>
+      <div class="form-row">
+        <div class="form-group"><label>Nome completo</label><input type="text" id="colab-nome" placeholder="Ex: João da Silva"></div>
+        <div class="form-group"><label>Matrícula</label><input type="number" id="colab-matricula" placeholder="Ex: 1042"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Perfil</label>
+          <select id="colab-perfil"><option>Operador</option><option>Administrador</option></select>
+        </div>
+        <div class="form-group"><label>Status</label>
+          <select id="colab-status"><option>Ativo</option><option>Inativo</option></select>
+        </div>
+      </div>
+      <div class="form-group"><label>Senha inicial</label><input type="password" id="colab-senha" placeholder="Mínimo 6 caracteres"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-colab')">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarColab()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-doc">
+    <div class="modal">
+      <div class="modal-title">📄 Novo Documento</div>
+      <div class="form-group"><label>Tipo de documento</label>
+        <select id="doc-tipo">
+          <option>ASO</option><option>CNH</option><option>Toxicológico</option>
+          <option>NR-06</option><option>NR-11</option><option>NR-11/18</option>
+          <option>NR-12</option><option>NR-18</option><option>NR-35</option>
+          <option>Direção Defensiva</option><option>Integração por Cliente</option>
+          <option>Cinto Paraquedista / CA</option><option>Ficha de EPI / OS</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Operador</label>
+        <select id="doc-operador"><option value="">Selecione um operador</option></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Data de emissão</label><input type="date" id="doc-emissao"></div>
+        <div class="form-group"><label>Data de validade</label><input type="date" id="doc-validade"></div>
+      </div>
+      <div class="form-group"><label>Arquivo (imagem)</label><input type="file" accept="image/*"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-doc')">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarDoc()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-equip">
+    <div class="modal">
+      <div class="modal-title">🚛 Novo Equipamento</div>
+      <div class="form-group"><label>Nome / Identificação</label><input type="text" id="equip-nome" placeholder="Ex: Caminhão Scania 01"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Tipo</label>
+          <select id="equip-tipo">
+            <option>Caminhão</option><option>Van</option><option>Trator</option>
+            <option>Máquina</option><option>Outro</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Status</label>
+          <select id="equip-status"><option>Ativo</option><option>Manutenção</option><option>Inativo</option></select>
+        </div>
+      </div>
+      <div class="form-group"><label>Placa</label><input type="text" id="equip-placa" placeholder="Ex: ABC-1234"></div>
+      <div class="form-group"><label>Operador responsável</label>
+        <select id="equip-operador"><option value="">Nenhum</option></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-equip')">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarEquip()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-empresa">
+    <div class="modal">
+      <div class="modal-title">🏢 Documento da Empresa</div>
+      <div class="form-group"><label>Título do documento</label><input type="text" id="emp-titulo" placeholder="Ex: Alvará de funcionamento"></div>
+      <div class="form-group"><label>Categoria</label>
+        <select id="emp-categoria">
+          <option>Alvará</option><option>Certificação</option><option>Contrato</option>
+          <option>Licença</option><option>Seguro</option><option>Outro</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Emissão</label><input type="date" id="emp-emissao"></div>
+        <div class="form-group"><label>Validade</label><input type="date" id="emp-validade"></div>
+      </div>
+      <div class="form-group"><label>Arquivo</label><input type="file"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-empresa')">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarEmpresa()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">✔ Mensagem</div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,11 +1,18 @@
 import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'app_responsive.dart';
+import 'app_settings.dart';
+import 'app_theme.dart';
+import 'services/mlkit_ocr_service.dart';
 
 class EmpresaDocumentosScreen extends StatefulWidget {
   const EmpresaDocumentosScreen({super.key});
@@ -18,7 +25,6 @@ class EmpresaDocumentosScreen extends StatefulWidget {
 class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
   final db = FirebaseFirestore.instance;
   final supabase = Supabase.instance.client;
-  final picker = ImagePicker();
 
   bool carregando = true;
   bool isAdmin = false;
@@ -35,13 +41,22 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
     'Todos',
     'ART de Equipamento Especial',
     'Ficha de EPI / OS',
+    'Licença',
+    'Alvará',
+    'Seguro',
+    'Certificado',
+    'Laudo Técnico',
+    'Contrato',
+    'Outros',
   ];
 
   final List<String> equipamentosEmpresa = [
     'Balancim',
+    'Gaiola',
     'Gaiola 1',
     'Gaiola 2',
     'Gaiola 3',
+    'Gaiola 4',
     'Braço',
     'Geral',
   ];
@@ -119,12 +134,10 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
 
     if (vencimentoSemHora.isBefore(hojeSemHora)) return 'expired';
 
-    if (vencimentoSemHora.isBefore(
-          hojeSemHora.add(const Duration(days: 30)),
-        ) ||
-        vencimentoSemHora.isAtSameMomentAs(
-          hojeSemHora.add(const Duration(days: 30)),
-        )) {
+    final limite = hojeSemHora.add(Duration(days: appSettings.notificationDays));
+
+    if (vencimentoSemHora.isBefore(limite) ||
+        vencimentoSemHora.isAtSameMomentAs(limite)) {
       return 'warning';
     }
 
@@ -212,24 +225,413 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
     );
   }
 
-  Future<XFile?> escolherImagem() async {
-    return picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
+  Future<PlatformFile?> escolherArquivoDocumentoEmpresa() async {
+    final resultado = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+      withData: true,
     );
+
+    if (resultado == null || resultado.files.isEmpty) {
+      return null;
+    }
+
+    return resultado.files.first;
   }
 
-  Future<Map<String, String>> uploadImagemEmpresa(XFile imagem) async {
-    final bytes = await imagem.readAsBytes();
+  Future<DateTime?> detectarValidadeEmpresaPorOCR(PlatformFile arquivo) async {
+    final recognizedText = await MlkitOcrService.reconhecerTexto(arquivo);
 
+    if (recognizedText == null) return null;
+
+    final textoOriginal = recognizedText.text;
+      final texto = textoOriginal.toLowerCase();
+
+      final regexData = RegExp(r'\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b');
+      final matches = regexData.allMatches(textoOriginal).toList();
+
+      if (matches.isEmpty) return null;
+
+      DateTime? converterData(RegExpMatch match) {
+        final dia = int.tryParse(match.group(1) ?? '');
+        final mes = int.tryParse(match.group(2) ?? '');
+        final ano = int.tryParse(match.group(3) ?? '');
+
+        if (dia == null || mes == null || ano == null) return null;
+        if (dia < 1 || dia > 31 || mes < 1 || mes > 12 || ano < 2000) {
+          return null;
+        }
+
+        return DateTime.tryParse(
+          '${ano.toString().padLeft(4, '0')}-'
+          '${mes.toString().padLeft(2, '0')}-'
+          '${dia.toString().padLeft(2, '0')}',
+        );
+      }
+
+      final palavrasChave = [
+        'validade',
+        'válido até',
+        'valido ate',
+        'vencimento',
+        'vence em',
+        'data de validade',
+        'data validade',
+      ];
+
+      DateTime? melhorData;
+      int melhorPontuacao = -1;
+
+      for (final match in matches) {
+        final data = converterData(match);
+        if (data == null) continue;
+
+        final inicioData = match.start;
+        final fimData = match.end;
+
+        final inicioJanela = (inicioData - 80).clamp(0, texto.length);
+        final fimJanela = (fimData + 40).clamp(0, texto.length);
+
+        final contexto = texto.substring(inicioJanela, fimJanela);
+
+        int pontuacao = 0;
+
+        for (final palavra in palavrasChave) {
+          if (contexto.contains(palavra)) {
+            pontuacao += 10;
+          }
+        }
+
+        final hoje = DateTime.now();
+        final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
+
+        if (data.isAfter(hojeSemHora)) {
+          pontuacao += 5;
+        } else {
+          pontuacao -= 5;
+        }
+
+        if (data.year >= 2024 && data.year <= 2035) {
+          pontuacao += 2;
+        }
+
+        if (pontuacao > melhorPontuacao) {
+          melhorPontuacao = pontuacao;
+          melhorData = data;
+        }
+      }
+
+      return melhorData;
+  }
+
+  Future<DateTime?> detectarEmissaoEmpresaPorOCR(PlatformFile arquivo) async {
+    final recognizedText = await MlkitOcrService.reconhecerTexto(arquivo);
+
+    if (recognizedText == null) return null;
+
+    final textoOriginal = recognizedText.text;
+      final texto = textoOriginal.toLowerCase();
+
+      final regexData = RegExp(r'\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b');
+      final matches = regexData.allMatches(textoOriginal).toList();
+
+      if (matches.isEmpty) return null;
+
+      DateTime? converterData(RegExpMatch match) {
+        final dia = int.tryParse(match.group(1) ?? '');
+        final mes = int.tryParse(match.group(2) ?? '');
+        final ano = int.tryParse(match.group(3) ?? '');
+
+        if (dia == null || mes == null || ano == null) return null;
+        if (dia < 1 || dia > 31 || mes < 1 || mes > 12 || ano < 2000) {
+          return null;
+        }
+
+        return DateTime.tryParse(
+          '${ano.toString().padLeft(4, '0')}-'
+          '${mes.toString().padLeft(2, '0')}-'
+          '${dia.toString().padLeft(2, '0')}',
+        );
+      }
+
+      final palavrasChave = [
+        'data de emissão',
+        'data emissao',
+        'data de emissao',
+        'emissão',
+        'emissao',
+        'emitido em',
+        'data do documento',
+        'data de realização',
+        'data de realizacao',
+      ];
+
+      DateTime? melhorData;
+      int melhorPontuacao = -1;
+
+      for (final match in matches) {
+        final data = converterData(match);
+        if (data == null) continue;
+
+        final inicioData = match.start;
+        final fimData = match.end;
+
+        final inicioJanela = (inicioData - 80).clamp(0, texto.length);
+        final fimJanela = (fimData + 40).clamp(0, texto.length);
+
+        final contexto = texto.substring(inicioJanela, fimJanela);
+
+        int pontuacao = 0;
+
+        for (final palavra in palavrasChave) {
+          if (contexto.contains(palavra)) {
+            pontuacao += 10;
+          }
+        }
+
+        final hoje = DateTime.now();
+        final hojeSemHora = DateTime(hoje.year, hoje.month, hoje.day);
+
+        if (data.isBefore(hojeSemHora) || data.isAtSameMomentAs(hojeSemHora)) {
+          pontuacao += 5;
+        }
+
+        if (data.year >= 2020 && data.year <= 2035) {
+          pontuacao += 2;
+        }
+
+        if (pontuacao > melhorPontuacao) {
+          melhorPontuacao = pontuacao;
+          melhorData = data;
+        }
+      }
+
+      return melhorData;
+  }
+
+  Future<String?> detectarTipoEmpresaPorOCR(PlatformFile arquivo) async {
+    final recognizedText = await MlkitOcrService.reconhecerTexto(arquivo);
+
+    if (recognizedText == null) return null;
+
+    final texto = recognizedText.text.toLowerCase();
+
+      final regras = <String, List<String>>{
+        'ART de Equipamento Especial': [
+        'anotação de responsabilidade técnica',
+        'anotacao de responsabilidade tecnica',
+        'art nº',
+        'art n°',
+        'registro art',
+        'número da art',
+        'numero da art',
+        'equipamento especial',
+      ],
+        'Ficha de EPI / OS': [
+          'ficha de epi',
+          'ordem de serviço',
+          'ordem de servico',
+          'os de segurança',
+          'os de seguranca',
+          'entrega de epi',
+          'equipamento de proteção individual',
+          'equipamento de protecao individual',
+        ],
+        'Licença': [
+          'licença',
+          'licenca',
+          'licenciamento',
+          'autorização',
+          'autorizacao',
+        ],
+        'Alvará': [
+          'alvará',
+          'alvara',
+          'alvará de funcionamento',
+          'alvara de funcionamento',
+          'prefeitura',
+        ],
+        'Seguro': [
+          'seguro',
+          'apólice',
+          'apolice',
+          'seguradora',
+          'cobertura',
+        ],
+        'Certificado': [
+          'certificado',
+          'certificação',
+          'certificacao',
+          'declaração',
+          'declaracao',
+          'certificado de conformidade',
+          'certificamos que',
+          'este certificado',
+          'certificado',
+          'conformidade',
+          'autenticidade',
+        ],
+        'Laudo Técnico': [
+          'laudo técnico',
+          'laudo tecnico',
+          'parecer técnico',
+          'parecer tecnico',
+          'inspeção',
+          'inspecao',
+          'vistoria',
+        ],
+        'Contrato': [
+          'contrato',
+          'contratante',
+          'contratada',
+          'prestação de serviços',
+          'prestacao de servicos',
+        ],
+      };
+
+      String? melhorTipo;
+      int melhorPontuacao = 0;
+
+      regras.forEach((tipo, palavras) {
+        int pontuacao = 0;
+
+        for (final palavra in palavras) {
+          if (texto.contains(palavra)) {
+            if (palavra.length >= 25) {
+              pontuacao += 30;
+            } else if (palavra.length >= 12) {
+              pontuacao += 20;
+            } else {
+              pontuacao += 10;
+            }
+          }
+        }
+
+        if (pontuacao > melhorPontuacao) {
+          melhorPontuacao = pontuacao;
+          melhorTipo = tipo;
+        }
+      });
+
+      if (melhorPontuacao == 0) return 'Outros';
+
+      if (!tiposEmpresa.contains(melhorTipo)) {
+        return 'Outros';
+      }
+
+      return melhorTipo;
+  }
+
+  Future<String?> detectarEquipamentoEmpresaPorOCR(PlatformFile arquivo) async {
+    final recognizedText = await MlkitOcrService.reconhecerTexto(arquivo);
+
+    if (recognizedText == null) return null;
+
+    final texto = recognizedText.text.toLowerCase();
+
+      final regras = <String, List<String>>{
+        'Balancim': [
+          'balancim',
+          'andaime suspenso',
+          'plataforma suspensa',
+        ],
+        'Gaiola': [
+        'gaiola',
+        'gaiola de elevação',
+        'gaiola de elevacao',
+        'gaiola de elevação de pessoas',
+        'gaiola de elevacao de pessoas',
+      ],
+        'Gaiola 1': [
+          'gaiola 1',
+          'gaiola nº 1',
+          'gaiola n° 1',
+          'gaiola numero 1',
+        ],
+        'Gaiola 2': [
+          'gaiola 2',
+          'gaiola nº 2',
+          'gaiola n° 2',
+          'gaiola numero 2',
+        ],
+        'Gaiola 3': [
+          'gaiola 3',
+          'gaiola nº 3',
+          'gaiola n° 3',
+          'gaiola numero 3',
+        ],
+        'Braço': [
+          'braço',
+          'braco',
+          'braço articulado',
+          'braco articulado',
+        ],
+        'Geral': [
+          'geral',
+          'documento geral',
+          'documento da empresa',
+        ],
+      };
+
+      String? melhorEquipamento;
+      int melhorPontuacao = 0;
+
+      regras.forEach((equipamento, palavras) {
+        int pontuacao = 0;
+
+        for (final palavra in palavras) {
+          if (texto.contains(palavra)) {
+            if (palavra.length >= 18) {
+              pontuacao += 25;
+            } else if (palavra.length >= 10) {
+              pontuacao += 15;
+            } else {
+              pontuacao += 10;
+            }
+          }
+        }
+
+        if (pontuacao > melhorPontuacao) {
+          melhorPontuacao = pontuacao;
+          melhorEquipamento = equipamento;
+        }
+      });
+
+      if (melhorPontuacao == 0) return null;
+
+      if (!equipamentosEmpresa.contains(melhorEquipamento)) {
+        return null;
+      }
+
+      return melhorEquipamento;
+  }
+
+  Future<void> abrirFormularioDocumentoEmpresaComArquivo(
+    PlatformFile arquivo,
+  ) async {
+    await abrirFormularioDocumento(arquivoInicial: arquivo);
+  }
+
+  Future<Map<String, String>> uploadArquivoEmpresa(PlatformFile arquivo) async {
+    final bytes = arquivo.bytes;
+
+    if (bytes == null) {
+      throw Exception('Não foi possível ler o arquivo selecionado.');
+    }
+
+    final extensao = arquivo.extension?.toLowerCase() ?? 'jpg';
     final arquivoPath =
-        'empresa/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        'empresa/${DateTime.now().millisecondsSinceEpoch}.$extensao';
+
+    final contentType = extensao == 'pdf'
+        ? 'application/pdf'
+        : 'image/$extensao';
 
     await supabase.storage.from('documentos').uploadBinary(
           arquivoPath,
           bytes,
-          fileOptions: const FileOptions(
-            contentType: 'image/jpeg',
+          fileOptions: FileOptions(
+            contentType: contentType,
             upsert: false,
           ),
         );
@@ -243,6 +645,8 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
     return {
       'url': url,
       'path': arquivoPath,
+      'tipo': extensao == 'pdf' ? 'pdf' : 'imagem',
+      'nome': arquivo.name,
     };
   }
 
@@ -262,9 +666,36 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
       ),
     );
   }
+  Future<void> abrirPdf(String url) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode != 200) {
+        mostrarErro('Erro ao baixar PDF: ${response.statusCode}');
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/documento_empresa.pdf');
+
+      await file.writeAsBytes(response.bodyBytes, flush: true);
+
+      if (!mounted) return;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VisualizarPdfEmpresaScreen(pdfPath: file.path),
+        ),
+      );
+    } catch (e) {
+      mostrarErro('Erro ao abrir PDF: $e');
+    }
+  }
 
   Future<void> abrirFormularioDocumento({
     Map<String, dynamic>? documento,
+    PlatformFile? arquivoInicial,
   }) async {
     if (!isAdmin) {
       mostrarErro('Acesso permitido somente para administradores.');
@@ -298,26 +729,97 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
       text: dataVencimento != null ? formatarData(dataVencimento) : '',
     );
 
-    XFile? imagemSelecionada;
-    Uint8List? imagemBytes;
+    PlatformFile? arquivoSelecionado = arquivoInicial;
+    Uint8List? arquivoBytes = arquivoInicial?.bytes;
+    String? arquivoTipoSelecionado = arquivoInicial == null
+        ? null
+        : arquivoInicial.extension?.toLowerCase() == 'pdf'
+            ? 'pdf'
+            : 'imagem';
+
     bool salvando = false;
+    bool analisandoOCR = false;
+    bool ocrInicialExecutado = false;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface(context),
+      constraints: AppResponsive.modalConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            if (!ocrInicialExecutado &&
+                arquivoInicial != null &&
+                arquivoInicial.extension?.toLowerCase() != 'pdf') {
+              ocrInicialExecutado = true;
+
+              Future.microtask(() async {
+                setModalState(() {
+                  analisandoOCR = true;
+                });
+
+                try {
+                  final resultados = await Future.wait([
+                    detectarValidadeEmpresaPorOCR(arquivoInicial),
+                    detectarTipoEmpresaPorOCR(arquivoInicial),
+                    detectarEmissaoEmpresaPorOCR(arquivoInicial),
+                    detectarEquipamentoEmpresaPorOCR(arquivoInicial),
+                  ]);
+
+                  final dataDetectada = resultados[0] as DateTime?;
+                  final tipoDetectado = resultados[1] as String?;
+                  final emissaoDetectada = resultados[2] as DateTime?;
+                  final equipamentoDetectado = resultados[3] as String?;
+
+                  setModalState(() {
+                    if (dataDetectada != null) {
+                      dataVencimento = dataDetectada;
+                      vencimentoController.text = formatarData(dataDetectada);
+                    }
+
+                    if (tipoDetectado != null) {
+                      tipoSelecionadoForm = tipoDetectado;
+                    }
+
+                    if (emissaoDetectada != null) {
+                      dataEmissao = emissaoDetectada;
+                      emissaoController.text = formatarData(emissaoDetectada);
+                    }
+
+                    if (equipamentoDetectado != null) {
+                      equipamentoSelecionado = equipamentoDetectado;
+                    }
+
+                    analisandoOCR = false;
+                  });
+
+                  if (dataDetectada != null ||
+                      tipoDetectado != null ||
+                      emissaoDetectada != null ||
+                      equipamentoDetectado != null) {
+                    mostrarSucesso('Dados detectados automaticamente.');
+                  }
+
+                } catch (e) {
+                  setModalState(() {
+                    analisandoOCR = false;
+                  });
+                }
+              });
+            }
             Future<void> salvar() async {
+              dataEmissao = parseDataDigitada(emissaoController.text);
+              dataVencimento = parseDataDigitada(vencimentoController.text);
+
               if (tipoSelecionadoForm == null ||
                   equipamentoSelecionado == null ||
                   dataEmissao == null ||
                   dataVencimento == null ||
-                  (!editando && imagemSelecionada == null)) {
+                  (!editando && arquivoSelecionado == null)) {
                 mostrarErro('Preencha todos os campos obrigatórios.');
                 return;
               }
@@ -329,17 +831,21 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
               try {
                 String? arquivoUrl = documento?['arquivo_url'];
                 String? arquivoPath = documento?['arquivo_path'];
+                String? arquivoTipo = documento?['arquivo_tipo'];
+                String? arquivoNome = documento?['arquivo_nome'];
 
-                if (imagemSelecionada != null) {
+                if (arquivoSelecionado != null) {
                   if (editando &&
                       arquivoPath != null &&
                       arquivoPath.isNotEmpty) {
                     await deletarArquivoStorage(arquivoPath);
                   }
 
-                  final upload = await uploadImagemEmpresa(imagemSelecionada!);
+                  final upload = await uploadArquivoEmpresa(arquivoSelecionado!);
                   arquivoUrl = upload['url'];
                   arquivoPath = upload['path'];
+                  arquivoTipo = upload['tipo'];
+                  arquivoNome = upload['nome'];
                 }
 
                 final nome =
@@ -357,6 +863,8 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                   'arquivo_url': arquivoUrl,
                   'arquivo_path': arquivoPath,
                   'observacao': observacaoController.text.trim(),
+                  'arquivo_tipo': arquivoTipo,
+                  'arquivo_nome': arquivoNome,
                 };
 
                 if (editando) {
@@ -411,6 +919,38 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (analisandoOCR)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF4E8),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFE87722),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Analisando documento...',
+                                style: TextStyle(
+                                  color: Color(0xFFE87722),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 18),
                     DropdownButtonFormField<String>(
                       value: tipoSelecionadoForm,
@@ -483,15 +1023,82 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                     const SizedBox(height: 12),
                     InkWell(
                       onTap: () async {
-                        final imagem = await escolherImagem();
+                        final arquivo = await escolherArquivoDocumentoEmpresa();
 
-                        if (imagem != null) {
-                          final bytes = await imagem.readAsBytes();
+                        if (arquivo != null) {
+                          final tipoArquivo =
+                              arquivo.extension?.toLowerCase() == 'pdf' ? 'pdf' : 'imagem';
 
                           setModalState(() {
-                            imagemSelecionada = imagem;
-                            imagemBytes = bytes;
+                            arquivoSelecionado = arquivo;
+                            arquivoBytes = arquivo.bytes;
+                            arquivoTipoSelecionado = tipoArquivo;
                           });
+
+                          if (tipoArquivo == 'imagem') {
+                            setModalState(() {
+                              analisandoOCR = true;
+                            });
+
+                            try {
+                              final resultados = await Future.wait([
+                                detectarValidadeEmpresaPorOCR(arquivo),
+                                detectarTipoEmpresaPorOCR(arquivo),
+                                detectarEmissaoEmpresaPorOCR(arquivo),
+                                detectarEquipamentoEmpresaPorOCR(arquivo),
+                              ]);
+
+                              final dataDetectada = resultados[0] as DateTime?;
+                              final tipoDetectado = resultados[1] as String?;
+                              final emissaoDetectada =
+                                  resultados[2] as DateTime?;
+                              final equipamentoDetectado =
+                                  resultados[3] as String?;
+
+                              setModalState(() {
+                                if (dataDetectada != null) {
+                                  dataVencimento = dataDetectada;
+                                  vencimentoController.text =
+                                      formatarData(dataDetectada);
+                                }
+
+                                if (tipoDetectado != null) {
+                                  tipoSelecionadoForm = tipoDetectado;
+                                }
+
+                                if (emissaoDetectada != null) {
+                                  dataEmissao = emissaoDetectada;
+                                  emissaoController.text =
+                                      formatarData(emissaoDetectada);
+                                }
+
+                                if (equipamentoDetectado != null) {
+                                  equipamentoSelecionado = equipamentoDetectado;
+                                }
+
+                                analisandoOCR = false;
+                              });
+
+                              if (dataDetectada != null ||
+                                  tipoDetectado != null ||
+                                  emissaoDetectada != null ||
+                                  equipamentoDetectado != null) {
+                                mostrarSucesso(
+                                  'Dados detectados automaticamente.',
+                                );
+                              } else {
+                                mostrarErro(
+                                  'Nenhum dado foi detectado automaticamente.',
+                                );
+                              }
+                            } catch (e) {
+                              setModalState(() {
+                                analisandoOCR = false;
+                              });
+
+                              mostrarErro('Erro ao analisar imagem: $e');
+                            }
+                          }
                         }
                       },
                       child: Container(
@@ -506,14 +1113,33 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                         ),
                         child: Column(
                           children: [
-                            if (imagemBytes != null)
+                            const Row(
+                              children: [
+                                Icon(
+                                  Icons.image_rounded,
+                                  color: Color(0xFFE87722),
+                                  size: 20,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Prévia do documento',
+                                  style: TextStyle(
+                                    color: Color(0xFF1A202C),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (arquivoBytes != null && arquivoTipoSelecionado == 'imagem')
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
                                 child: Image.memory(
-                                  imagemBytes!,
-                                  height: 160,
+                                  arquivoBytes!,
+                                  height: 300,
                                   width: double.infinity,
-                                  fit: BoxFit.cover,
+                                  fit: BoxFit.contain,
                                 ),
                               )
                             else if (editando &&
@@ -522,9 +1148,48 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                                 borderRadius: BorderRadius.circular(12),
                                 child: Image.network(
                                   documento['arquivo_url'].toString(),
-                                  height: 160,
+                                  height: 300,
                                   width: double.infinity,
-                                  fit: BoxFit.cover,
+                                  fit: BoxFit.contain,
+                                ),
+                              )
+                            else if (arquivoTipoSelecionado == 'pdf')
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFEBEE),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFE53935).withOpacity(0.25),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const Icon(
+                                      Icons.picture_as_pdf,
+                                      size: 72,
+                                      color: Color(0xFFE53935),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      arquivoSelecionado?.name ?? 'Documento PDF',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Color(0xFF1A202C),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'O PDF será salvo junto ao documento.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Color(0xFF718096),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               )
                             else
@@ -534,10 +1199,45 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
                                 color: Color(0xFFE87722),
                               ),
                             const SizedBox(height: 8),
+                            if (arquivoSelecionado != null) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF7ED),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFFE87722).withOpacity(0.25),
+                                  ),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.touch_app_rounded,
+                                      color: Color(0xFFE87722),
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Toque aqui para trocar o arquivo selecionado.',
+                                        style: TextStyle(
+                                          color: Color(0xFF8A4B14),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             Text(
-                              imagemSelecionada == null
-                                  ? 'Tirar foto do documento'
-                                  : 'Foto selecionada',
+                              arquivoSelecionado == null
+                                  ? 'Selecionar imagem ou PDF'
+                                  : arquivoSelecionado!.name,
+                              textAlign: TextAlign.center,
                               style: const TextStyle(
                                 color: Color(0xFF1A202C),
                                 fontWeight: FontWeight.w600,
@@ -715,6 +1415,11 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
     final emissao = parseData(documento['data_emissao']);
 
     final arquivoUrl = documento['arquivo_url']?.toString();
+    final arquivoTipo = documento['arquivo_tipo']?.toString();
+    final arquivoPath = documento['arquivo_path']?.toString();
+
+    final arquivoEhPdf = arquivoTipo == 'pdf' ||
+        (arquivoPath != null && arquivoPath.toLowerCase().endsWith('.pdf'));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -727,17 +1432,33 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
       child: Row(
         children: [
           GestureDetector(
-            onTap: arquivoUrl != null ? () => abrirImagem(arquivoUrl) : null,
+            onTap: arquivoUrl != null
+                ? () => arquivoEhPdf ? abrirPdf(arquivoUrl) : abrirImagem(arquivoUrl)
+                : null,
             child: arquivoUrl != null && arquivoUrl.isNotEmpty
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      arquivoUrl,
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.cover,
-                    ),
-                  )
+                ? arquivoEhPdf
+                    ? Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEBEE),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.picture_as_pdf,
+                          color: Color(0xFFE53935),
+                          size: 34,
+                        ),
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          arquivoUrl,
+                          width: 64,
+                          height: 64,
+                          fit: BoxFit.contain,
+                        ),
+                      )
                 : CircleAvatar(
                     backgroundColor: cor.withOpacity(0.15),
                     child: Icon(Icons.business_rounded, color: cor),
@@ -747,7 +1468,7 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
           Expanded(
             child: GestureDetector(
               onTap: arquivoUrl != null && arquivoUrl.isNotEmpty
-                  ? () => abrirImagem(arquivoUrl)
+                  ? () => arquivoEhPdf ? abrirPdf(arquivoUrl) : abrirImagem(arquivoUrl)
                   : null,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,12 +1733,12 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
 
                 DropdownButtonFormField<String>(
                   value: tipoSelecionado,
-                  dropdownColor: Colors.white,
+                  dropdownColor: AppTheme.surface(context),
                   decoration: InputDecoration(
                     hintText:
                         'Tipo de documento',
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: Theme.of(context).inputDecorationTheme.fillColor,
                     contentPadding:
                         const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -1178,7 +1899,7 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Documentos da Empresa',
@@ -1187,12 +1908,18 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: const Color(0xFF0D1B2A),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       floatingActionButton: isAdmin
           ? FloatingActionButton(
-              onPressed: () => abrirFormularioDocumento(),
+              onPressed: () async {
+                final arquivo = await escolherArquivoDocumentoEmpresa();
+
+                if (arquivo == null) return;
+
+                abrirFormularioDocumentoEmpresaComArquivo(arquivo);
+              },
               backgroundColor: const Color(0xFFE87722),
               foregroundColor: Colors.white,
               child: const Icon(Icons.add_rounded),
@@ -1200,7 +1927,7 @@ class _EmpresaDocumentosScreenState extends State<EmpresaDocumentosScreen> {
           : null,
       body: carregando
           ? const Center(child: CircularProgressIndicator())
-          : listaDocumentos(),
+          : AppResponsiveBody(child: listaDocumentos()),
     );
   }
 }
@@ -1244,6 +1971,40 @@ class VisualizarDocumentoEmpresaScreen extends StatelessWidget {
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+class VisualizarPdfEmpresaScreen extends StatelessWidget {
+  final String pdfPath;
+
+  const VisualizarPdfEmpresaScreen({
+    super.key,
+    required this.pdfPath,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Visualizar PDF',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: SfPdfViewer.file(
+        File(pdfPath),
+        onDocumentLoadFailed: (details) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao abrir PDF: ${details.description}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        },
       ),
     );
   }

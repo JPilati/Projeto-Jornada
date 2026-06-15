@@ -2,8 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'home_screen.dart';
+import 'app_responsive.dart';
+import 'app_theme.dart';
 import 'home_admin_screen.dart';
+import 'home_screen.dart';
 
 class AlterarSenhaScreen extends StatefulWidget {
   const AlterarSenhaScreen({super.key});
@@ -104,137 +106,149 @@ class _AlterarSenhaScreenState extends State<AlterarSenhaScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(mensagem),
-        backgroundColor: Colors.red,
+        backgroundColor: AppTheme.red,
+      ),
+    );
+  }
+
+  Widget passwordField({
+    required TextEditingController controller,
+    required String label,
+    required bool obscureText,
+    required VoidCallback onToggle,
+    required IconData icon,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscureText,
+      style: TextStyle(color: AppTheme.textPrimary(context)),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        suffixIcon: IconButton(
+          icon: Icon(
+            obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          ),
+          onPressed: onToggle,
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = AppResponsive.isDesktop(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1B2A),
-      body: SafeArea(
-        child: Column(
+      backgroundColor: AppTheme.pageBackground(context),
+      body: AppResponsiveBody(
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Expanded(
-              child: Center(
-                child: SizedBox(
-                  width: 200,
-                  height: 200,
-                  child: Image.asset(
-                    'assets/images/logo.png',
-                    fit: BoxFit.contain,
-                  ),
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppTheme.navy950, AppTheme.navy850],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
               ),
             ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Alterar senha',
-                    style: TextStyle(
-                      color: Color(0xFF1A202C),
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isDesktop ? 560 : double.infinity,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Por segurança, altere sua senha provisória antes de continuar.',
-                    style: TextStyle(
-                      color: Color(0xFF718096),
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  TextField(
-                    controller: novaSenhaController,
-                    obscureText: ocultarNovaSenha,
-                    decoration: InputDecoration(
-                      labelText: 'Nova senha',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          ocultarNovaSenha
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            ocultarNovaSenha = !ocultarNovaSenha;
-                          });
-                        },
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF7F9FC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: confirmarSenhaController,
-                    obscureText: ocultarConfirmarSenha,
-                    decoration: InputDecoration(
-                      labelText: 'Confirmar senha',
-                      prefixIcon: const Icon(Icons.lock_reset),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          ocultarConfirmarSenha
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            ocultarConfirmarSenha = !ocultarConfirmarSenha;
-                          });
-                        },
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF7F9FC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: carregando ? null : alterarSenha,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE87722),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: carregando
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'ALTERAR SENHA E CONTINUAR',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 148,
+                          child: Image.asset(
+                            'assets/images/logo.png',
+                            fit: BoxFit.contain,
                           ),
+                        ),
+                        const SizedBox(height: 34),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(28),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surface(context).withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(color: AppTheme.border(context)),
+                            boxShadow: AppTheme.cardShadow(context),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'Alterar senha',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary(context),
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Por segurança, altere sua senha provisória antes de continuar.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary(context),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 26),
+                              passwordField(
+                                controller: novaSenhaController,
+                                label: 'Nova senha',
+                                icon: Icons.lock_outline_rounded,
+                                obscureText: ocultarNovaSenha,
+                                onToggle: () {
+                                  setState(() {
+                                    ocultarNovaSenha = !ocultarNovaSenha;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              passwordField(
+                                controller: confirmarSenhaController,
+                                label: 'Confirmar senha',
+                                icon: Icons.lock_reset_rounded,
+                                obscureText: ocultarConfirmarSenha,
+                                onToggle: () {
+                                  setState(() {
+                                    ocultarConfirmarSenha = !ocultarConfirmarSenha;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton(
+                                onPressed: carregando ? null : alterarSenha,
+                                child: carregando
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Alterar senha e continuar'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           ],

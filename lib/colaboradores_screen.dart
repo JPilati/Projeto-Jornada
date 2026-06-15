@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'firebase_options.dart';
 import 'firebase_service.dart';
+import 'app_responsive.dart';
+import 'app_theme.dart';
 
 class ColaboradoresScreen extends StatefulWidget {
   const ColaboradoresScreen({super.key});
@@ -116,7 +118,8 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface(context),
+      constraints: AppResponsive.modalConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
@@ -465,11 +468,13 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surface(context),
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.border(context)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color:
+                Colors.black.withValues(alpha: AppTheme.isDark(context) ? 0.22 : 0.06),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -494,8 +499,8 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               children: [
                 Text(
                   usuario['nome'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF1A202C),
+                  style: TextStyle(
+                    color: AppTheme.textPrimary(context),
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
@@ -503,16 +508,16 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                 const SizedBox(height: 3),
                 Text(
                   usuario['cargo'] ?? '',
-                  style: const TextStyle(
-                    color: Color(0xFF718096),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary(context),
                     fontSize: 13,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Matrícula: ${usuario['matricula']}',
-                  style: const TextStyle(
-                    color: Color(0xFF718096),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary(context),
                     fontSize: 12,
                   ),
                 ),
@@ -672,7 +677,7 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                     .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Colaboradores',
@@ -681,7 +686,7 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: const Color(0xFF0D1B2A),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       floatingActionButton: isAdmin
@@ -692,7 +697,8 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
               child: const Icon(Icons.add),
             )
           : null,
-      body: Column(
+      body: AppResponsiveBody(
+        child: Column(
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
@@ -739,6 +745,7 @@ class _ColaboradoresScreenState extends State<ColaboradoresScreen> {
                       ),
           ),
         ],
+        ),
       ),
     );
   }

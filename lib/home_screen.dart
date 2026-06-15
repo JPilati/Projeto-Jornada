@@ -1,8 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'frota_operador_screen.dart';
-import 'firebase_service.dart';
+
+import 'app_responsive.dart';
+import 'app_theme.dart';
+import 'configuracoes_screen.dart';
 import 'documentos_screen.dart';
+import 'firebase_service.dart';
+import 'frota_operador_screen.dart';
 import 'main.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,11 +30,15 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final profile = await FirebaseService.buscarMeuPerfil();
 
+      if (!mounted) return;
+
       setState(() {
         nomeUsuario = profile?['nome'] ?? 'Operador';
         carregandoNome = false;
       });
     } catch (_) {
+      if (!mounted) return;
+
       setState(() {
         carregandoNome = false;
       });
@@ -62,15 +70,10 @@ class _HomeScreenState extends State<HomeScreen> {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface(context),
           borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          border: Border.all(color: AppTheme.border(context)),
+          boxShadow: AppTheme.cardShadow(context),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -87,8 +90,8 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 14),
             Text(
               title,
-              style: const TextStyle(
-                color: Color(0xFF1A202C),
+              style: TextStyle(
+                color: AppTheme.textPrimary(context),
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -97,8 +100,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF718096),
+              style: TextStyle(
+                color: AppTheme.textSecondary(context),
                 fontSize: 12,
               ),
             ),
@@ -110,136 +113,156 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = AppResponsive.isDesktop(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
-              color: const Color(0xFF0D1B2A),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Image.asset(
-                        'assets/images/logo.png',
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.contain,
-                      ),
-                      const SizedBox(width: 10),
-                      const Text(
-                        'Hub Digital',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => _logout(context),
-                        child: const CircleAvatar(
-                          backgroundColor: Color(0xFF1B2F46),
-                          child: Icon(Icons.logout, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFF12365A),
-                          Color(0xFF0D1B2A),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        child: AppResponsiveBody(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+                color: Theme.of(context).appBarTheme.backgroundColor,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          carregandoNome
-                              ? 'Bem-vindo 👋'
-                              : 'Bem-vindo, $nomeUsuario 👋',
-                          style: const TextStyle(
-                            color: Color(0xFFCBD5E0),
-                            fontSize: 14,
-                          ),
+                        Image.asset(
+                          'assets/images/logo.png',
+                          width: 56,
+                          height: 56,
+                          fit: BoxFit.contain,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(width: 10),
                         const Text(
-                          'Área do Operador',
+                          'Hub Digital',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 24,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Consulte seus documentos e informações.',
-                          style: TextStyle(
-                            color: Color(0xFFCBD5E0),
-                            fontSize: 14,
+                        const Spacer(),
+                        IconButton.filled(
+                          onPressed: () => _logout(context),
+                          icon: const Icon(Icons.logout),
+                          style: IconButton.styleFrom(
+                            backgroundColor: AppTheme.navy800,
+                            foregroundColor: Colors.white,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 0.92,
-                  children: [
-                    _buildFeatureCard(
-                      icon: Icons.description_rounded,
-                      title: 'Documentos',
-                      subtitle: 'Meus documentos',
-                      iconBgColor: const Color(0xFFFFF3E0),
-                      iconColor: const Color(0xFFE87722),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const DocumentosScreen(),
+                    const SizedBox(height: 24),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.navy800, AppTheme.navy950],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            carregandoNome
+                                ? 'Bem-vindo'
+                                : 'Bem-vindo, $nomeUsuario',
+                            style: const TextStyle(
+                              color: AppTheme.darkInfo,
+                              fontSize: 14,
+                            ),
                           ),
-                        );
-                      },
-                    ),
-                    _buildFeatureCard(
-                      icon: Icons.local_shipping_rounded,
-                      title: 'Frota',
-                      subtitle: 'Meus veículos',
-                      iconBgColor: Colors.green.shade100,
-                      iconColor: Colors.green,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const FrotaOperadorScreen(),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Área do Operador',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        );
-                      },
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Consulte seus documentos e informações.',
+                            style: TextStyle(
+                              color: AppTheme.darkInfo,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: GridView.count(
+                    crossAxisCount: isDesktop ? 4 : 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: isDesktop ? 1.35 : 0.92,
+                    children: [
+                      _buildFeatureCard(
+                        icon: Icons.description_rounded,
+                        title: 'Documentos',
+                        subtitle: 'Meus documentos',
+                        iconBgColor: AppTheme.orange.withValues(alpha: 0.16),
+                        iconColor: AppTheme.orange,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const DocumentosScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildFeatureCard(
+                        icon: Icons.local_shipping_rounded,
+                        title: 'Frota',
+                        subtitle: 'Meus veículos',
+                        iconBgColor: AppTheme.green.withValues(alpha: 0.16),
+                        iconColor: AppTheme.green,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const FrotaOperadorScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildFeatureCard(
+                        icon: Icons.settings_rounded,
+                        title: 'Configurações',
+                        subtitle: 'Preferências',
+                        iconBgColor: AppTheme.blue.withValues(alpha: 0.16),
+                        iconColor: AppTheme.blue,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ConfiguracoesScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

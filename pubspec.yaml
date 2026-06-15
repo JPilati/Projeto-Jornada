@@ -13,28 +13,22 @@ dependencies:
 
   cupertino_icons: ^1.0.9
 
-  # 🔹 FIREBASE
   firebase_core: ^4.8.0
   firebase_auth: ^6.5.0
   cloud_firestore: ^6.4.0
 
-  # 🔹 SUPABASE STORAGE
   supabase_flutter: ^2.10.0
 
-  # 🔹 MAPA
-  flutter_map: ^8.3.0
-  latlong2: ^0.9.1
-  geolocator: ^14.0.2
-  http: ^1.5.0
+  http: ^1.6.0
 
-  # 🔹 QR CODE
-  qr_flutter: ^4.1.0
-
-  # 🔹 IMAGENS
   image_picker: ^1.2.2
 
-  # 🔹 MÁSCARA DE DATA
   mask_text_input_formatter: ^2.9.0
+  file_picker: ^10.3.3
+  syncfusion_flutter_pdfviewer: ^33.2.12
+  path_provider: ^2.1.5
+  google_mlkit_text_recognition: ^0.15.1
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
@@ -42,8 +36,17 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
 
+  flutter_launcher_icons: ^0.14.4
+
 flutter:
   uses-material-design: true
 
   assets:
     - assets/images/logo.png
+    - assets/images/login_background.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/Logo2.png"
+  remove_alpha_ios: true

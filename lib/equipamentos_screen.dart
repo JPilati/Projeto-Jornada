@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'app_responsive.dart';
+import 'app_theme.dart';
 import 'equipamento_detalhes_screen.dart';
+import 'services/mlkit_ocr_service.dart';
 
 class EquipamentosScreen extends StatefulWidget {
   const EquipamentosScreen({super.key});
@@ -140,6 +144,250 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
     );
   }
 
+  Future<PlatformFile?> escolherImagemParaOCR() async {
+    final resultado = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png'],
+      withData: true,
+    );
+
+    if (resultado == null || resultado.files.isEmpty) {
+      return null;
+    }
+
+    return resultado.files.first;
+  }
+
+  Future<Map<String, String?>> lerDadosEquipamentoPorOCR(
+    PlatformFile arquivo,
+  ) async {
+    final recognizedText = await MlkitOcrService.reconhecerTexto(arquivo);
+
+    if (recognizedText == null) {
+      throw Exception('Nao foi possivel acessar a imagem selecionada.');
+    }
+
+      final textoOriginal = recognizedText.text;
+      final texto = textoOriginal.toLowerCase();
+      final linhas = textoOriginal
+          .split(RegExp(r'\r?\n'))
+          .map((linha) => linha.trim())
+          .where((linha) => linha.isNotEmpty)
+          .toList();
+
+      final linhasComPosicao = recognizedText.blocks
+          .expand((block) => block.lines)
+          .toList();
+
+      String? valorVisualAoLado(List<String> rotulos) {
+        for (final linhaRotulo in linhasComPosicao) {
+          final textoRotulo = linhaRotulo.text.toLowerCase();
+
+          if (!rotulos.any((rotulo) => textoRotulo.contains(rotulo))) {
+            continue;
+          }
+
+          final caixaRotulo = linhaRotulo.boundingBox;
+          final centroRotulo = caixaRotulo.top + (caixaRotulo.height / 2);
+
+          dynamic melhorLinha;
+          double melhorDistancia = double.infinity;
+
+          for (final linhaValor in linhasComPosicao) {
+            if (identical(linhaValor, linhaRotulo)) continue;
+
+            final caixaValor = linhaValor.boundingBox;
+            final centroValor = caixaValor.top + (caixaValor.height / 2);
+            final desalinhamento = (centroValor - centroRotulo).abs();
+            final distanciaHorizontal = caixaValor.left - caixaRotulo.right;
+
+            if (desalinhamento > caixaRotulo.height * 1.5) continue;
+            if (distanciaHorizontal < -8) continue;
+
+            final textoValor = linhaValor.text.toLowerCase();
+            final pareceOutroRotulo = [
+              'nome / identifica',
+              'tipo de ve',
+              'placa',
+              'capacidade',
+              'combust',
+              'cor',
+              'ano / modelo',
+              'marca / modelo',
+              'potencia',
+              'renavam',
+              'chassi',
+            ].any((rotulo) => textoValor.contains(rotulo));
+
+            if (pareceOutroRotulo) continue;
+
+            final distancia = distanciaHorizontal.abs() + desalinhamento;
+
+            if (distancia < melhorDistancia) {
+              melhorDistancia = distancia;
+              melhorLinha = linhaValor;
+            }
+          }
+
+          final valor = melhorLinha?.text.trim();
+
+          if (valor != null && valor.isNotEmpty) {
+            return valor;
+          }
+        }
+
+        return null;
+      }
+
+      final placaMatch = RegExp(
+        r'\b([A-Z]{3})[-\s]?([0-9][A-Z][0-9]{2})\b',
+      ).firstMatch(textoOriginal.toUpperCase());
+
+      final capacidadeMatch = RegExp(
+        r'(capacidade|cap\.?|peso bruto total|pbt|lotacao|lotação)'
+        r'[:\s-]*([0-9]+(?:[,.][0-9]+)?\s*(?:kg|kgs|t|ton|toneladas|pessoas|m3|m³)?)',
+        caseSensitive: false,
+      ).firstMatch(textoOriginal);
+
+      String? valorDaLinhaComRotulo(List<String> rotulos) {
+        for (var i = 0; i < linhas.length; i++) {
+          final linha = linhas[i];
+          final linhaLower = linha.toLowerCase();
+
+          final temRotulo =
+              rotulos.any((rotulo) => linhaLower.contains(rotulo));
+
+          if (!temRotulo) continue;
+
+          final partes = linha.split(RegExp(r'\s{2,}|:|-'));
+          final ultimoTrecho = partes.last.trim();
+
+          if (partes.length > 1 && ultimoTrecho.isNotEmpty) {
+            return ultimoTrecho;
+          }
+
+          for (var proxima = i + 1; proxima < linhas.length; proxima++) {
+            final valor = linhas[proxima].trim();
+            final valorLower = valor.toLowerCase();
+
+            final ehOutroRotulo = [
+              'tipo',
+              'placa',
+              'capacidade',
+              'combust',
+              'cor',
+              'ano',
+              'marca',
+              'potencia',
+              'renavam',
+              'chassi',
+            ].any((rotulo) => valorLower.contains(rotulo));
+
+            if (ehOutroRotulo) break;
+            if (valor.isNotEmpty) return valor;
+          }
+        }
+
+        return null;
+      }
+
+      final rotulosNome = [
+        'nome / identifica',
+        'nome',
+      ];
+      final rotulosTipo = [
+        'tipo de ve',
+        'tipo',
+      ];
+      final rotulosPlaca = [
+        'placa',
+      ];
+      final rotulosCapacidade = [
+        'capacidade de carga',
+        'capacidade',
+        'pbt',
+      ];
+
+      final nomePorRotulo =
+          valorVisualAoLado(rotulosNome) ?? valorDaLinhaComRotulo(rotulosNome);
+      final tipoPorRotulo =
+          valorVisualAoLado(rotulosTipo) ?? valorDaLinhaComRotulo(rotulosTipo);
+      final placaPorRotulo = valorVisualAoLado(rotulosPlaca) ??
+          valorDaLinhaComRotulo(rotulosPlaca);
+      final capacidadePorRotulo = valorVisualAoLado(rotulosCapacidade) ??
+          valorDaLinhaComRotulo(rotulosCapacidade);
+
+      String? tipo;
+      final tipos = <String, List<String>>{
+        'Caminhao Munck': ['munck', 'guindauto', 'guindaste veicular'],
+        'Guindaste': ['guindaste', 'grua'],
+        'Empilhadeira': ['empilhadeira'],
+        'Plataforma elevatoria': [
+          'plataforma elevatoria',
+          'plataforma elevatória',
+          'plataforma aerea',
+          'plataforma aérea',
+        ],
+        'Caminhao': ['caminhao', 'caminhão'],
+        'Carreta': ['carreta', 'semirreboque', 'semi reboque'],
+        'Escavadeira': ['escavadeira'],
+        'Retroescavadeira': ['retroescavadeira'],
+      };
+
+      for (final item in tipos.entries) {
+        final textoTipo = (tipoPorRotulo ?? texto).toLowerCase();
+
+        if (item.value.any((palavra) => textoTipo.contains(palavra))) {
+          tipo = item.key;
+          break;
+        }
+      }
+
+      String? nome = nomePorRotulo;
+      final nomeMatch = RegExp(
+        r'(modelo|veiculo|veículo|equipamento|descricao|descrição)'
+        r'[:\s-]+([A-Za-z0-9 .\/-]{3,48})',
+        caseSensitive: false,
+      ).firstMatch(textoOriginal);
+
+      if (nome == null && nomeMatch != null) {
+        nome = nomeMatch.group(2)?.trim();
+      } else if (nome == null) {
+        for (final linha in linhas.take(8)) {
+          final minuscula = linha.toLowerCase();
+          final pareceDadoUtil = linha.length >= 4 &&
+              !minuscula.contains('certificado') &&
+              !minuscula.contains('validade') &&
+              !minuscula.contains('renavam') &&
+              !minuscula.contains('placa') &&
+              !RegExp(r'^\d').hasMatch(linha);
+
+          if (pareceDadoUtil) {
+            nome = linha;
+            break;
+          }
+        }
+      }
+
+      final placaPorRotuloLimpa = placaPorRotulo
+          ?.toUpperCase()
+          .replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+      return {
+        'nome': nome,
+        'tipo': tipo,
+        'placa': placaPorRotuloLimpa != null &&
+                RegExp(r'^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$')
+                    .hasMatch(placaPorRotuloLimpa)
+            ? placaPorRotuloLimpa
+            : placaMatch == null
+            ? null
+            : '${placaMatch.group(1)}${placaMatch.group(2)}',
+        'capacidade':
+            capacidadePorRotulo?.trim() ?? capacidadeMatch?.group(2)?.trim(),
+      };
+  }
+
   Future<void> abrirFormulario({Map<String, dynamic>? equipamento}) async {
     final adminFirestore = await verificarAdminNoFirestore();
 
@@ -160,14 +408,14 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         TextEditingController(text: equipamento?['capacidade'] ?? '');
 
     String statusSelecionado = equipamento?['status'] ?? 'Ativo';
+    bool analisandoOCR = false;
 
-    List<String> operadoresSelecionados =
-        List<String>.from(equipamento?['operadoresPermitidos'] ?? []);
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface(context),
+      constraints: AppResponsive.modalConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
@@ -191,6 +439,90 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                         color: Color(0xFF1A202C),
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 22),
+                    OutlinedButton.icon(
+                      onPressed: analisandoOCR
+                          ? null
+                          : () async {
+                              final arquivo = await escolherImagemParaOCR();
+
+                              if (arquivo == null) return;
+
+                              setModalState(() {
+                                analisandoOCR = true;
+                              });
+
+                              try {
+                                final dados =
+                                    await lerDadosEquipamentoPorOCR(arquivo);
+
+                                setModalState(() {
+                                  if ((dados['nome'] ?? '').isNotEmpty) {
+                                    nomeController.text = dados['nome']!;
+                                  }
+
+                                  if ((dados['tipo'] ?? '').isNotEmpty) {
+                                    tipoController.text = dados['tipo']!;
+                                  }
+
+                                  if ((dados['placa'] ?? '').isNotEmpty) {
+                                    placaController.text = dados['placa']!;
+                                  }
+
+                                  if ((dados['capacidade'] ?? '').isNotEmpty) {
+                                    capacidadeController.text =
+                                        dados['capacidade']!;
+                                  }
+
+                                  analisandoOCR = false;
+                                });
+
+                                final preenchidos = dados.values
+                                    .where(
+                                      (valor) =>
+                                          (valor ?? '').trim().isNotEmpty,
+                                    )
+                                    .length;
+
+                                if (preenchidos > 0) {
+                                  mostrarSucesso(
+                                    'Dados preenchidos pela imagem.',
+                                  );
+                                } else {
+                                  mostrarErro(
+                                    'Nenhum dado foi detectado na imagem.',
+                                  );
+                                }
+                              } catch (e) {
+                                setModalState(() {
+                                  analisandoOCR = false;
+                                });
+
+                                mostrarErro('Erro ao ler imagem: $e');
+                              }
+                            },
+                      icon: analisandoOCR
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.document_scanner_rounded),
+                      label: Text(
+                        analisandoOCR
+                            ? 'Lendo imagem...'
+                            : 'Ler imagem com Google ML Kit',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFE87722),
+                        minimumSize: const Size(double.infinity, 48),
+                        side: const BorderSide(color: Color(0xFFE87722)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -237,70 +569,6 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                         });
                       },
                     ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Operadores autorizados',
-                      style: TextStyle(
-                        color: Color(0xFF1A202C),
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (operadores.isEmpty)
-                      const Text(
-                        'Nenhum operador cadastrado.',
-                        style: TextStyle(
-                          color: Color(0xFF718096),
-                          fontSize: 13,
-                        ),
-                      )
-                    else
-                      Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F7FB),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Column(
-                          children: operadores.map((operador) {
-                            final operadorId = operador['id'].toString();
-                            final nomeOperador = operador['nome'] ?? 'Operador';
-
-                            final selecionado =
-                                operadoresSelecionados.contains(operadorId);
-
-                            return CheckboxListTile(
-                              value: selecionado,
-                              activeColor: const Color(0xFFE87722),
-                              title: Text(
-                                nomeOperador,
-                                style: const TextStyle(
-                                  color: Color(0xFF1A202C),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                operador['cargo'] ?? '',
-                                style: const TextStyle(
-                                  color: Color(0xFF718096),
-                                  fontSize: 12,
-                                ),
-                              ),
-                              onChanged: (value) {
-                                setModalState(() {
-                                  if (value == true) {
-                                    operadoresSelecionados.add(operadorId);
-                                  } else {
-                                    operadoresSelecionados.remove(operadorId);
-                                  }
-                                });
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ),
-
-                    const SizedBox(height: 22),
                     ElevatedButton(
                       onPressed: () async {
                         if (nomeController.text.trim().isEmpty ||
@@ -330,7 +598,6 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                                   'placa': placaController.text.trim(),
                                   'capacidade': capacidadeController.text.trim(),
                                   'status': statusSelecionado,
-                                  'operadoresPermitidos': operadoresSelecionados,
                                   'updatedAt': FieldValue.serverTimestamp(),
                                 });
                           } else {
@@ -340,7 +607,6 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                               'placa': placaController.text.trim(),
                               'capacidade': capacidadeController.text.trim(),
                               'status': statusSelecionado,
-                              'operadoresPermitidos': operadoresSelecionados,
                               'createdAt': FieldValue.serverTimestamp(),
                             });
                           }
@@ -470,11 +736,13 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface(context),
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.border(context)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color:
+                  Colors.black.withValues(alpha: AppTheme.isDark(context) ? 0.22 : 0.06),
               blurRadius: 10,
               offset: const Offset(0, 5),
             ),
@@ -497,8 +765,8 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                 children: [
                   Text(
                     equipamento['nome'] ?? '',
-                    style: const TextStyle(
-                      color: Color(0xFF1A202C),
+                    style: TextStyle(
+                      color: AppTheme.textPrimary(context),
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -506,16 +774,16 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                   const SizedBox(height: 4),
                   Text(
                     equipamento['tipo'] ?? 'Sem tipo',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary(context),
                       fontSize: 13,
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Placa: ${equipamento['placa'] ?? '-'}',
-                    style: const TextStyle(
-                      color: Color(0xFF718096),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary(context),
                       fontSize: 12,
                     ),
                   ),
@@ -540,28 +808,6 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                     ),
                   ),
                 ),
-                if (isAdmin)
-                  PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'editar') {
-                        abrirFormulario(equipamento: equipamento);
-                      }
-
-                      if (value == 'excluir') {
-                        excluirEquipamento(equipamento);
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'editar',
-                        child: Text('Editar'),
-                      ),
-                      PopupMenuItem(
-                        value: 'excluir',
-                        child: Text('Excluir'),
-                      ),
-                    ],
-                  ),
               ],
             ),
           ],
@@ -620,14 +866,24 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
         equipamentos.where((item) => item['status'] == 'Manutenção').length;
     final inativos =
         equipamentos.where((item) => item['status'] == 'Inativo').length;
-    final equipamentosFiltrados = filtroSelecionado == null
+    String? statusFiltro;
+
+    if (filtroSelecionado == 'Ativos') {
+      statusFiltro = 'Ativo';
+    } else if (filtroSelecionado == 'Inativos') {
+      statusFiltro = 'Inativo';
+    } else {
+      statusFiltro = filtroSelecionado;
+    }
+
+    final equipamentosFiltrados = statusFiltro == null
         ? equipamentos
         : equipamentos
-            .where((item) => item['status'] == filtroSelecionado)
+            .where((item) => item['status'] == statusFiltro)
             .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: AppTheme.pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Frota',
@@ -636,7 +892,7 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: const Color(0xFF0D1B2A),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       floatingActionButton: isAdmin
@@ -649,9 +905,10 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
           : null,
       body: carregando
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Container(
+          : AppResponsiveBody(
+              child: Column(
+                children: [
+                  Container(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                   decoration: const BoxDecoration(
                     color: Color(0xFF0D1B2A),
@@ -691,8 +948,9 @@ class _EquipamentosScreenState extends State<EquipamentosScreen> {
                           children:
                               equipamentosFiltrados.map(equipamentoCard).toList(),
                         ),
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
     );
   }
